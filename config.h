@@ -34,21 +34,31 @@
 
 
 /* =========================================================
- * PROTOKÓŁ RC (ExpressLRS / CRSF)
+ * PROTOKÓŁ RC (ExpressLRS / CRSF - RadioMaster Pocket)
  * ========================================================= */
 
 #define ELRS_BAUDRATE       420000  // Domyślny baudrate protokołu CRSF
 
 // Kanały CRSF (indeksowane standardowo 1-16)
-#define CRSF_CH_STEER       1       // Kanał 1: Ster (Roll/Yaw w zależności od aparatury)
+#define CRSF_CH_STEER       1       // Kanał 1: Ster
 #define CRSF_CH_THRO        3       // Kanał 3: Gaz (Throttle)
+// Uwaga: CH5 (AUX1) w ELRS zarezerwowany jest pod stan ARM
+#define CRSF_CH_SW_SB       6       // Kanał 6 (AUX2): Przełącznik SB (3-pozycyjny) -> Włącznik/Wyłącznik BT
+#define CRSF_CH_SW_SC       7       // Kanał 7 (AUX3): Przełącznik SC (3-pozycyjny) -> Zapasowy / funkcyjny
+
+// Alias semantyczny dla kodu logiki
+#define CRSF_CH_BT_SWITCH   CRSF_CH_SW_SB
 
 // Wartości kanałów po dekodowaniu do standardu mikrosekund
 #define RC_MIN_US           1000
 #define RC_CENTER_US        1500
 #define RC_MAX_US           2000
 
-#define THRO_ARM_THRESHOLD_US 1050  // Powyżej tego progu startuje rejestracja (STATE_RECORDING)
+#define THRO_ARM_THRESHOLD_US 1080  // Powyżej tego progu startuje rejestracja (STATE_RECORDING)
+
+// Progi detekcji stanów przełączników 3-pozycyjnych
+#define RC_SW_LOW_THRESHOLD_US  1300 // Poniżej 1300 us = Pozycja LOW (np. BT OFF)
+#define RC_SW_HIGH_THRESHOLD_US 1700 // Powyżej 1700 us = Pozycja HIGH (np. BT ON)
 
 
 /* =========================================================
@@ -58,6 +68,7 @@
 #define ESC_MIN_US          1000
 #define ESC_MAX_US          2000
 #define ESC_ARM_US          1000
+#define ESC_DEADZONE_US     1180    // Poniżej silnik może nie kręcić stabilnie
 #define ESC_ARM_TIME_MS     3000    // Czas trzymania 1000 us na start dla Flycolor
 
 #define SERVO_MIN_US        1000

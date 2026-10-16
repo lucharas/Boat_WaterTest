@@ -3,27 +3,26 @@
 #include "config.h"
 #include "types.h"
 
-/* =========================
-   Zmienne globalne
-   ========================= */
+/* =========================================================
+ * ZMIENNE GLOBALNE (współdzielone między modułami)
+ * ========================================================= */
 
 extern SystemData sys;
-
 extern LogSample logBuffer[MAX_SAMPLES];
 extern uint16_t sampleCount;
 
 
-/* =========================
-   drv_RC
-   ========================= */
+/* =========================================================
+ * drv_RC
+ * ========================================================= */
 
 void initRC();
 void updateRC();
 
 
-/* =========================
-   drv_Actuators
-   ========================= */
+/* =========================================================
+ * drv_Actuators
+ * ========================================================= */
 
 void initActuators();
 void setMotor(uint16_t pwmUs);
@@ -31,53 +30,55 @@ void setRudder(uint16_t pwmUs);
 void stopMotor();
 
 
-/* =========================
-   drv_Sensors
-   ========================= */
+/* =========================================================
+ * drv_Sensors
+ * ========================================================= */
 
 void initSensors();
 void updateSensors();
 
 
-/* =========================
-   logic_FSM
-   ========================= */
+/* =========================================================
+ * logic_FSM
+ * ========================================================= */
 
 void updateFSM();
 void setState(BoatState newState);
 
 
-/* =========================
-   logic_Safety
-   ========================= */
+/* =========================================================
+ * logic_Safety
+ * ========================================================= */
 
 void updateSafety();
 bool isBatteryLow();
 bool isPowerOverload();
 
 
-/* =========================
-   log_Data
-   ========================= */
+/* =========================================================
+ * log_Data
+ * ========================================================= */
 
 void initLog();
 void addSample();
 void clearLog();
+void dumpLog(Print& stream);  // Przyjmuje SerialBT lub Serial
 
 
-/* =========================
-   hmi_BT
-   ========================= */
+/* =========================================================
+ * hmi_BT (Zarządzanie radiem i konsolą telemetryczną)
+ * ========================================================= */
 
 void initBT();
 void updateBT();
-void dumpLog();
+void startBT();              // Aktywacja radia BluetoothSerial
+void stopBT();               // Wyłączenie radia BT (ochrona pasma 2.4 GHz)
+void dumpLog();              // Zrzut bufora RAM w formacie CSV
 
 
-/* =========================
-   hmi_Status
-   ========================= */
+/* =========================================================
+ * hmi_Status (Sygnalizacja NeoPixel)
+ * ========================================================= */
 
 void initStatus();
 void updateStatus();
-void setLedColor(uint8_t color);
