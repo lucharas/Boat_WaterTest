@@ -148,7 +148,6 @@ struct LogSample {
     int32_t  lon;
     uint16_t voltageMv;
     int16_t  currentMa;
-    uint16_t powerDeciW;
     uint16_t speedCms;
     uint16_t headingDeg10;
     uint16_t cogDeg10;
@@ -157,6 +156,7 @@ struct LogSample {
     uint8_t  satellites;
     uint16_t hdop100;
     uint8_t  gpsAge100ms;
+    uint16_t reserved; 
 };
 ```
 
