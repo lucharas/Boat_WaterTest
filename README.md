@@ -161,11 +161,11 @@ struct LogSample {
 ```
 
 - lat i lon są skalowane przez 1e-6
-- powerDeciW przechowuje moc w 0,1 W
 - headingDeg10 i cogDeg10 przechowują kąt w 0,1 stopnia
 - hdop100 przechowuje HDOP pomnożony przez 100, np. 0,85 jako 85
 - gpsAge100ms przechowuje wiek danych GPS w jednostkach 100 ms; wartość jest ograniczana do 255, czyli 25,5 s
 - Liczba satelitów, HDOP i wiek danych pozwalają ocenić jakość każdej próbki GPS
+- Rezerwa wyrównująca do pełnych 32 bajtów (2 B)
 - Struktura zajmuje 32 B bez pola flag
 - Rozmiar należy potwierdzić przez static_assert(sizeof(LogSample) == 32)
 
