@@ -1,10 +1,11 @@
 #pragma once
 
+#include <Arduino.h>
 #include "config.h"
 #include "types.h"
 
 /* =========================================================
- * ZMIENNE GLOBALNE (współdzielone między modułami)
+ * ZMIENNE GLOBALNE WSPÓŁDZIELONE (definiowane w Boat_WaterTest.ino)
  * ========================================================= */
 
 extern SystemData sys;
@@ -13,7 +14,7 @@ extern uint16_t sampleCount;
 
 
 /* =========================================================
- * drv_RC
+ * drv_RC (Obsługa protokołu CRSF / ExpressLRS)
  * ========================================================= */
 
 void initRC();
@@ -21,17 +22,18 @@ void updateRC();
 
 
 /* =========================================================
- * drv_Actuators
+ * drv_Actuators (LEDC PWM dla ESC Flycolor i serwa steru)
  * ========================================================= */
 
 void initActuators();
+void updateActuators();
 void setMotor(uint16_t pwmUs);
 void setRudder(uint16_t pwmUs);
 void stopMotor();
 
 
 /* =========================================================
- * drv_Sensors
+ * drv_Sensors (I2C: INA226, BNO055 oraz UART: GPS TinyGPS++)
  * ========================================================= */
 
 void initSensors();
@@ -39,15 +41,16 @@ void updateSensors();
 
 
 /* =========================================================
- * logic_FSM
+ * logic_FSM (Jawna maszyna stanów łodzi)
  * ========================================================= */
 
+void initFSM();
 void updateFSM();
 void setState(BoatState newState);
 
 
 /* =========================================================
- * logic_Safety
+ * logic_Safety (Nadzór nad zasilaniem, przeciążeniem i linkiem RC)
  * ========================================================= */
 
 void updateSafety();
@@ -56,29 +59,27 @@ bool isPowerOverload();
 
 
 /* =========================================================
- * log_Data
+ * log_Data (Rejestracja próbek do RAM i eksport CSV)
  * ========================================================= */
 
 void initLog();
 void addSample();
 void clearLog();
-void dumpLog(Print& stream);  // Przyjmuje SerialBT lub Serial
+void dumpLog(Stream &out);
 
 
 /* =========================================================
- * hmi_BT (Zarządzanie radiem i konsolą telemetryczną)
+ * hmi_BT (Bluetooth Serial - diagnostyka i komendy)
  * ========================================================= */
 
 void initBT();
 void updateBT();
-void startBT();              // Aktywacja radia BluetoothSerial
-void stopBT();               // Wyłączenie radia BT (ochrona pasma 2.4 GHz)
-void dumpLog();              // Zrzut bufora RAM w formacie CSV
 
 
 /* =========================================================
- * hmi_Status (Sygnalizacja NeoPixel)
+ * hmi_Status (Animacje diody WS2812B NeoPixel)
  * ========================================================= */
 
 void initStatus();
 void updateStatus();
+void setLedColor(uint8_t r, uint8_t g, uint8_t b);
