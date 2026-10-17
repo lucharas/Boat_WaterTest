@@ -1,64 +1,129 @@
 #include "declarations.h"
 
-// Obiekt odbiornika CRSF (zainicjalizowany w oparciu o sprzętowy Serial1)
-// Zgodnie z wytycznymi instancja może być również przeniesiona do Boat_WaterTest.ino
-static CRSFforArduino crsf;
 
 /* =========================================================
- * INICJALIZACJA ODBIORNIKA ELRS (CRSF)
+ * STAN WEWNĘTRZNY MODUŁU
+ * ========================================================= */
+
+static bool rcFrameValid = false;
+
+
+/* =========================================================
+ * CALLBACK KANAŁÓW RC
+ * ========================================================= */
+
+static void onReceiveRcChannels(
+    serialReceiverLayer::rcChannels_t *channels
+) {
+    rcFrameValid = channels->valid && !channels->failsafe;
+
+    if (!rcFrameValid) {
+        return;
+    }
+
+    sys.rcSteerUs = constrain(
+        crsf.rcToUs(crsf.getChannel(CRSF_CH_STEER)),
+        (int)RC_MIN_US,
+        (int)RC_MAX_US
+    );
+
+    sys.rcThroUs = constrain(
+        crsf.rcToUs(crsf.getChannel(CRSF_CH_THRO)),
+        (int)RC_MIN_US,
+        (int)RC_MAX_US
+    );
+
+    sys.rcSbUs = constrain(
+        crsf.rcToUs(crsf.getChannel(CRSF_CH_SB)),
+        (int)RC_MIN_US,
+        (int)RC_MAX_US
+    );
+
+    sys.rcScUs = constrain(
+        crsf.rcToUs(crsf.getChannel(CRSF_CH_SC)),
+        (int)RC_MIN_US,
+        (int)RC_MAX_US
+    );
+
+    sys.rcNoLimits =
+        sys.rcScUs >= RC_SC_HIGH_THRESHOLD_US;
+}
+
+
+/* =========================================================
+ * CALLBACK STATYSTYK ŁĄCZA
+ * ========================================================= */
+
+static void onLinkStatisticsUpdate(
+    serialReceiverLayer::link_statistics_t linkStatistics
+) {
+    sys.rssiDbm  = linkStatistics.rssi;
+    sys.lqPercent = constrain(
+        linkStatistics.lqi,
+        0,
+        100
+    );
+}
+
+
+/* =========================================================
+ * WARTOŚCI BEZPIECZNE
+ * ========================================================= */
+
+static void setRcSafeValues() {
+    sys.rcSteerUs  = RC_CENTER_US;
+    sys.rcThroUs   = RC_MIN_US;
+    sys.rcSbUs     = RC_MIN_US;
+    sys.rcScUs     = RC_MIN_US;
+    sys.rcNoLimits = false;
+}
+
+
+/* =========================================================
+ * INICJALIZACJA CRSF / EXPRESSLRS
  * ========================================================= */
 
 void initRC() {
-    // Inicjalizacja magistrali Serial1 dla protokołu CRSF (420 000 baud)
-    // GPIO 34 = RX (Input-only), GPIO 32 = TX
-    Serial1.begin(ELRS_BAUDRATE, SERIAL_8N1, PIN_ELRS_RX, PIN_ELRS_TX);
+    setRcSafeValues();
 
-    crsf.begin(Serial1);
+    sys.linkUp   = false;
+    sys.rssiDbm  = -128;
+    sys.lqPercent = 0;
 
-    // Stan początkowy w strukturze systemowej
-    sys.rcLinkUp       = false;
-    sys.rcLinkQuality  = 0;
-    sys.rcRssi         = -128;
-    sys.rcThrottleUs   = RC_MIN_US;
-    sys.rcRudderUs     = RC_CENTER_US;
-    sys.rcSwitchSbUs   = RC_MIN_US;
-    sys.rcSwitchScUs   = RC_MIN_US;
+    rcFrameValid = false;
+
+    Serial1.begin(
+        ELRS_BAUDRATE,
+        SERIAL_8N1,
+        PIN_ELRS_RX,
+        PIN_ELRS_TX
+    );
+
+    if (!crsf.begin()) {
+        Serial.println("[RC] CRSF initialization failed");
+        return;
+    }
+
+    crsf.setRcChannelsCallback(onReceiveRcChannels);
+    crsf.setLinkStatisticsCallback(onLinkStatisticsUpdate);
+
+    Serial.println("[RC] CRSF initialized");
 }
 
+
 /* =========================================================
- * AKTUALIZACJA DANYCH RC (Częstotliwość wywołania: 50 Hz)
+ * AKTUALIZACJA ODBIORNIKA
+ *
+ * Wywoływana przez scheduler co TASK_RC_MS.
  * ========================================================= */
 
 void updateRC() {
-    // Odpytanie bufora portu szeregowego i dekodowanie ramek
     crsf.update();
 
-    // Sprawdzenie stanu połączenia z nadajnikiem RadioMaster Pocket
-    sys.rcLinkUp = crsf.isLinkUp();
+    sys.linkUp = crsf.isLinkUp() && rcFrameValid;
 
-    if (sys.rcLinkUp) {
-        // Pobranie telemetrii łącza radiowego
-        sys.rcLinkQuality = crsf.getLinkQuality();
-        sys.rcRssi        = crsf.getReceiveRssi();
-
-        // Odczyt drążków i przełączników z aparatury (zakres 1000 - 2000 us)
-        // crsf.getChannel(x) zwraca wartość PWM w mikrosekundach
-        sys.rcThrottleUs = constrain(crsf.getChannel(CRSF_CH_THRO), (int)RC_MIN_US, (int)RC_MAX_US);
-        sys.rcRudderUs   = constrain(crsf.getChannel(CRSF_CH_STEER), (int)RC_MIN_US, (int)RC_MAX_US);
-        
-        // Przełączniki funkcyjne (RadioMaster Pocket: SB = CH6, SC = CH7)
-        sys.rcSwitchSbUs = constrain(crsf.getChannel(CRSF_CH_SW_SB), (int)RC_MIN_US, (int)RC_MAX_US);
-        sys.rcSwitchScUs = constrain(crsf.getChannel(CRSF_CH_SW_SC), (int)RC_MIN_US, (int)RC_MAX_US);
-    } else {
-        // FAILSAFE NA POZIOMIE WEJŚCIA: Brak ramek RC
-        sys.rcLinkQuality = 0;
-        sys.rcRssi        = -128;
-
-        // Natychmiastowe zerowanie zadajników w buforze wejściowym
-        sys.rcThrottleUs = RC_MIN_US;      // 1000 us (odcięcie gazu)
-        sys.rcRudderUs   = RC_CENTER_US;    // 1500 us (ster na wprost)
-        // Stany przełączników w razie utraty sygnału pozostawiamy na poziomie bezpiecznym (LOW)
-        sys.rcSwitchSbUs = RC_MIN_US;
-        sys.rcSwitchScUs = RC_MIN_US;
+    if (!sys.linkUp) {
+        setRcSafeValues();
+        sys.lqPercent = 0;
     }
 }
