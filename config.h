@@ -5,7 +5,7 @@
  * ========================================================= */
 
 #define FW_NAME             "Boat_WaterTest"
-#define FW_VERSION          "0.1.0"
+#define FW_VERSION          "0.2.0"
 
 
 /* =========================================================
@@ -13,12 +13,12 @@
  * ========================================================= */
 
 // Odbiornik RC (ExpressLRS CRSF - HardwareSerial 1)
-#define PIN_ELRS_RX         34      // Wejście ESP (podłącz do TX odbiornika SuperD)
-#define PIN_ELRS_TX         32      // Wyjście ESP (podłącz do RX odbiornika SuperD pod telemetrię)
+#define PIN_ELRS_RX         34      // Wejście ESP (Serial1 RX, input-only)
+#define PIN_ELRS_TX         32      // Wyjście ESP (Serial1 TX, telemetria CRSF)
 
 // Napęd i sterowanie (wyjścia PWM)
-#define PIN_ESC             18      // Bezpieczny pin wyjściowy dla regulatora
-#define PIN_SERVO           19      // Bezpieczny pin wyjściowy dla serwa steru
+#define PIN_ESC             18      // Wyjście PWM dla regulatora Flycolor 90A
+#define PIN_SERVO           19      // Wyjście PWM dla serwa steru
 
 // GPS (HardwareSerial 2)
 #define PIN_GPS_RX          16      // RX2 (podłącz do TX modułu GPS)
@@ -34,31 +34,28 @@
 
 
 /* =========================================================
- * PROTOKÓŁ RC (ExpressLRS / CRSF - RadioMaster Pocket)
+ * PROTOKÓŁ RC (ExpressLRS / CRSF)
  * ========================================================= */
 
-#define ELRS_BAUDRATE       420000  // Domyślny baudrate protokołu CRSF
+#define ELRS_BAUDRATE       420000  // Domyślny baudrate CRSF
 
-// Kanały CRSF (indeksowane standardowo 1-16)
-#define CRSF_CH_STEER       1       // Kanał 1: Ster
-#define CRSF_CH_THRO        3       // Kanał 3: Gaz (Throttle)
-// Uwaga: CH5 (AUX1) w ELRS zarezerwowany jest pod stan ARM
-#define CRSF_CH_SW_SB       6       // Kanał 6 (AUX2): Przełącznik SB (3-pozycyjny) -> Włącznik/Wyłącznik BT
-#define CRSF_CH_SW_SC       7       // Kanał 7 (AUX3): Przełącznik SC (3-pozycyjny) -> Zapasowy / funkcyjny
+// Kanały CRSF (indeksowane 1-16)
+#define CRSF_CH_STEER       1       // Kanał 1: Ster (CH1)
+#define CRSF_CH_THRO        3       // Kanał 3: Gaz (CH3)
+#define CRSF_CH_MODE        6       // Kanał 6: Przełącznik SB (-100% DISARMED, 0% ARMED, 100% RECORDING)
+#define CRSF_CH_OVERRIDE    7       // Kanał 7: Przełącznik SC (Override limitu PWM do 100%)
 
-// Alias semantyczny dla kodu logiki
-#define CRSF_CH_BT_SWITCH   CRSF_CH_SW_SB
-
-// Wartości kanałów po dekodowaniu do standardu mikrosekund
+// Wartości sygnałów RC po dekodowaniu do mikrosekund
 #define RC_MIN_US           1000
 #define RC_CENTER_US        1500
 #define RC_MAX_US           2000
 
-#define THRO_ARM_THRESHOLD_US 1080  // Powyżej tego progu startuje rejestracja (STATE_RECORDING)
+// Progi detekcji przełącznika SB (3-pozycyjny)
+#define RC_SW_LOW_THRESHOLD_US   1300   // Poniżej: SB = -100% (DISARMED)
+#define RC_SW_HIGH_THRESHOLD_US  1700   // Powyżej: SB = +100% (RECORDING), pomiędzy: ARMED
 
-// Progi detekcji stanów przełączników 3-pozycyjnych
-#define RC_SW_LOW_THRESHOLD_US  1300 // Poniżej 1300 us = Pozycja LOW (np. BT OFF)
-#define RC_SW_HIGH_THRESHOLD_US 1700 // Powyżej 1700 us = Pozycja HIGH (np. BT ON)
+// Próg detekcji przełącznika SC (Override limitu PWM)
+#define RC_SW_OVERRIDE_TH_US     1600   // Powyżej: natychmiastowe 100% mocy bez limitu
 
 
 /* =========================================================
@@ -66,21 +63,19 @@
  * ========================================================= */
 
 #define ESC_MIN_US          1000
+#define ESC_DEADZONE_US     1180    // Poniżej tej wartości wyjście wymuszane na 1000 us
 #define ESC_MAX_US          2000
 #define ESC_ARM_US          1000
-#define ESC_DEADZONE_US     1180    // Poniżej silnik może nie kręcić stabilnie
-#define ESC_ARM_TIME_MS     3000    // Czas trzymania 1000 us na start dla Flycolor
+#define ESC_ARM_TIME_MS     3000    // Czas trzymania 1000 us podczas startu dla Flycolor
+#define ESC_RAMP_STEP_US    20      // Maksymalny przyrost sygnału na cykl 20 ms (rampa rozbiegu)
 
 #define SERVO_MIN_US        1000
 #define SERVO_CENTER_US     1500
 #define SERVO_MAX_US        2000
 
-// Konfiguracja sprzętowa PWM LEDC (50 Hz / 16-bit)
-#define PWM_FREQ_HZ         50
-#define PWM_BITS            16
-
-#define PWM_CH_ESC          0
-#define PWM_CH_SERVO        1
+// Sprzętowy PWM LEDC (ESP32 Core v3.x - konfiguracja bezpośrednio na pinach)
+#define PWM_FREQ_HZ         50      // 50 Hz dla ESC i serwa
+#define PWM_BITS            16      // Rozdzielczość 16-bit
 
 
 /* =========================================================
@@ -95,7 +90,7 @@
 // BNO055
 #define BNO055_I2C_ADDR     0x28
 
-// GPS (Dla odświeżania 5–10 Hz zalecane 38400 lub 115200 baud)
+// GPS
 #define GPS_BAUDRATE        38400
 
 
@@ -105,7 +100,7 @@
 
 #define LOG_RATE_HZ         5
 
-// 3000 próbek * 32 bajty = ~96 KB w pamięci RAM (ok. 10 minut testu)
+// 3000 próbek * 32 bajty = 96 000 B w pamięci RAM (10 minut testu przy 5 Hz)
 #define MAX_SAMPLES         3000
 
 
@@ -113,10 +108,11 @@
  * HARMONOGRAM SCHEDULERA (millis)
  * ========================================================= */
 
-#define TASK_RC_MS          20      // 50 Hz – odczyt CRSF, FSM, aktualizacja LEDC
-#define TASK_SENSOR_MS      100     // 10 Hz – INA226, BNO055, parsowanie bufora GPS
-#define TASK_LOG_MS         200     // 5 Hz  – zapis próbki do logBuffer w RAM
-#define TASK_STATUS_MS      50      // 20 Hz – płynna animacja/pulsowanie NeoPixel
+#define TASK_RC_MS          20      // 50 Hz – odczyt CRSF
+#define TASK_ACTUATORS_MS   20      // 50 Hz – aktualizacja LEDC i rampa
+#define TASK_SENSOR_MS      100     // 10 Hz – INA226, BNO055, bufor GPS
+#define TASK_LOG_MS         200     // 5 Hz  – zapis próbki do RAM
+#define TASK_STATUS_MS      50      // 20 Hz – animacja NeoPixel
 
 
 /* =========================================================
@@ -142,12 +138,11 @@
 #define POWER_WARN_W        280.0f
 #define POWER_FAIL_W        330.0f
 
-#define OVERLOAD_TIME_MS    250     // Czas przekroczenia progu wyzwalający Failsafe
+#define OVERLOAD_TIME_MS    250     // Czas przeciążenia wyzwalający Failsafe
 
 
 /* =========================================================
- * FSM & BLUETOOTH
+ * BLUETOOTH
  * ========================================================= */
 
-#define ARM_DELAY_MS        2000    // Czas gazu na minimum wymagany do przejścia w ARMED
 #define BT_DEVICE_NAME      "Boat_Telemetry"
