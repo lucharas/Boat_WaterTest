@@ -1,104 +1,107 @@
 #pragma once
 
 #include <Arduino.h>
-#include "config.h"
 
 /* =========================================================
- * 1. MASZYNA STANÓW (FSM)
+ * STANY AUTOMATU (FSM)
  * ========================================================= */
 
 enum BoatState : uint8_t {
-    STATE_BOOT = 0,         // Inicjalizacja sprzętu, kalibracja, sekwencja 3s dla ESC
-    STATE_DISARMED,         // Silnik STOP (1000 us), oczekiwanie na spełnienie warunków uzbrojenia
-    STATE_ARMED,            // Gotowość do startu, silnik STOP (gaz na minimum)
-    STATE_RECORDING,        // Aktywny rejs - zbieranie próbek do RAM przy gazie > 1080 us
-    STATE_FAILSAFE,         // Błąd krytyczny (bateria, przeciążenie, brak RC) - silnik STOP
-    STATE_BT_DUMP           // Zrzut danych CSV przez BT - silnik bezwzględnie zablokowany
-};
-
-enum FailsafeReason : uint8_t {
-    FAILSAFE_NONE = 0,
-    FAILSAFE_RC_LOST,       // Utrata linku CRSF / brak pakietów
-    FAILSAFE_BATTERY_LOW,   // Napięcie pakietu spadło poniżej progu odcięcia (19.2 V)
-    FAILSAFE_OVERCURRENT,   // Prąd przekroczył 16 A przez > 250 ms
-    FAILSAFE_OVERPOWER      // Moc przekroczyła 330 W przez > 250 ms
+    STATE_BOOT = 0,         // Inicjalizacja i uzbrajanie ESC (sygnał 1000 us)
+    STATE_DISARMED,         // Silnik odcięty, oczekiwanie na SB = 0%
+    STATE_ARMED,            // Sterowanie aktywne, bez zapisu próbek
+    STATE_RECORDING,        // Sterowanie aktywne, zapis próbek do RAM (5 Hz)
+    STATE_FAILSAFE,         // Awaryjne odcięcie silnika (błąd zasilania / utrata RC)
+    STATE_BT_DUMP           // Tryb serwisowy Bluetooth (napęd zablokowany)
 };
 
 
 /* =========================================================
- * 2. REKORD DANYCH POMIAROWYCH (LogSample - dokładnie 32B)
+ * PRZYCZYNY FAILSAFE
+ * ========================================================= */
+
+enum FailsafeReason : uint8_t {
+    FAILSAFE_NONE = 0,
+    FAILSAFE_RC_LOST,       // Utrata linku ExpressLRS
+    FAILSAFE_VOLTAGE_LOW,   // Napięcie pakietu poniżej 19.2 V
+    FAILSAFE_OVERCURRENT,   // Prąd > 16 A przez ponad 250 ms
+    FAILSAFE_OVERPOWER      // Moc > 330 W przez ponad 250 ms
+};
+
+
+/* =========================================================
+ * STRUKTURA PRÓBKI LOGU (DOKŁADNIE 32 BAJTY W RAM)
  * ========================================================= */
 
 #pragma pack(push, 1)
 struct LogSample {
-    uint32_t timestampMs;   // 4B: Czas od uruchomienia (millis)
-    int32_t  lat;           // 4B: Szerokość geograficzna (scaled 1e-6)
-    int32_t  lon;           // 4B: Długość geograficzna (scaled 1e-6)
-    uint16_t voltageMv;     // 2B: Napięcie szyny zasilania w mV
-    int16_t  currentMa;     // 2B: Prąd w mA
-    uint16_t powerMw;       // 2B: Moc w 0.1 W
-    uint16_t speedCms;      // 2B: Prędkość SOG z GPS w cm/s (1 m/s = 100 cm/s)
-    uint16_t headingDeg10;  // 2B: Kurs IMU (Yaw z BNO055) w 0.1 deg (0-3599)
-    uint16_t cogDeg10;      // 2B: Kurs GPS (COG) w 0.1 deg (0-3599)
-    uint16_t pwmThrottle;   // 2B: Sygnał PWM wysłany na ESC (1000-2000 us)
-    uint16_t pwmRudder;     // 2B: Sygnał PWM wysłany na serwo (1000-2000 us)
-    uint8_t  satellites;    // 1B: Liczba satelitów GPS
-    uint8_t  stateFlags;    // 1B: Maska bitowa (stan FSM, status fixa GPS, alarmy)
+    uint32_t timestampMs;       // Czas od startu ESP32 [ms] (4 B)
+    int32_t  lat;               // Szerokość geograficzna * 1e6 (4 B)
+    int32_t  lon;               // Długość geograficzna * 1e6 (4 B)
+    uint16_t voltageMv;         // Napięcie pakietu [mV] (2 B)
+    int16_t  currentMa;         // Prąd pobierany [mA] (2 B)
+    uint16_t speedCms;          // Prędkość SOG [cm/s] (2 B)
+    uint16_t headingDeg10;      // Kurs IMU BNO055 [0.1 deg, 0-3599] (2 B)
+    uint16_t cogDeg10;          // Kurs COG GPS [0.1 deg, 0-3599] (2 B)
+    uint16_t pwmThrottle;       // Wartość sterowania ESC [us] (2 B)
+    uint16_t pwmRudder;         // Wartość sterowania serwem [us] (2 B)
+    uint8_t  satellites;        // Liczba śledzonych satelitów (1 B)
+    uint16_t hdop100;           // Dokładność pozioma HDOP * 100 (2 B)
+    uint8_t  gpsAge100ms;       // Wiek danych GPS [100 ms, max 255 = 25.5s] (1 B)
+    uint16_t reserved;          // Rezerwa wyrównująca do pełnych 32 bajtów (2 B)
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LogSample) == 32, "LogSample size mismatch! Must be exactly 32 bytes.");
-
+// Weryfikacja rozmiaru struktury na etapie kompilacji
+static_assert(sizeof(LogSample) == 30, "LogSample size mismatch without padding");
+// Jeśli preferujemy wyrównanie do 32 bajtów z 2 bajtami wolnego zapasu na przyszłość:
+// Można usunąć #pragma pack i dodać uint16_t reserved; wtedy sizeof == 32.
 
 /* =========================================================
- * 3. ZBIORCZA STRUKTURA DANYCH SYSTEMOWYCH (SystemData)
+ * GŁÓWNA STRUKTURA STANU SYSTEMU (SystemData)
  * ========================================================= */
 
 struct SystemData {
-    // Stan automatu
-    BoatState      state;
-    BoatState      previousState;
-    FailsafeReason failsafeReason;
+    // Stan automatu i bezpieczeństwo
+    BoatState       state;
+    FailsafeReason  failsafeReason;
+    uint32_t        overloadStartTime;  // Znacznik czasu dla filtra przeciążenia > 250 ms
 
-    // Aparatura i link RC (CRSF / ELRS)
-    uint16_t rcThrottleUs;      // Bieżący odczyt gazu z aparatury (CH3)
-    uint16_t rcRudderUs;        // Bieżący odczyt steru z aparatury (CH1)
-    uint16_t rcSwitchSbUs;      // Przełącznik SB (CH6) - sterowanie BT
-    uint16_t rcSwitchScUs;      // Przełącznik SC (CH7) - zapasowy
-    bool     rcLinkUp;          // Flaga aktywnego linku radiowego
-    uint8_t  rcLinkQuality;     // Link Quality w %
-    int8_t   rcRssi;            // RSSI w dBm
+    // Odbiornik RC (CRSF)
+    uint16_t rcThrottle;        // CH3: Gaz (1000 - 2000 us)
+    uint16_t rcRudder;          // CH1: Ster (1000 - 2000 us)
+    uint16_t rcModeRaw;         // CH6: Przełącznik SB (surowy impuls us)
+    uint16_t rcOverrideRaw;     // CH7: Przełącznik SC (surowy impuls us)
+    bool     rcOverrideActive;  // Flaga sprzętowego pominięcia limitu PWM (100% mocy)
+    bool     linkUp;            // Flaga obecności połączenia RC
+    int8_t   rssi;              // Poziom sygnału RSSI [dBm]
+    uint8_t  lq;                // Link Quality [%]
 
-    // Nastawy aktuatorów i limit testowy
-    uint16_t escOutputUs;       // Wartość PWM wysyłana na ESC
-    uint16_t servoOutputUs;     // Wartość PWM wysyłana na serwo
-    uint16_t maxThrottlePwm;    // Maksymalny limit PWM dla drążka (1180 - 2000 us)
-    char     maxPwmStr[8];      // Tekstowa etykieta zadanego limitu (np. "pwm80")
+    // Czujnik zasilania (INA226)
+    float    voltageV;          // Napięcie pakietu [V]
+    float    currentA;          // Prąd [A]
+    float    powerW;            // Moc chwilowa [W]
 
-    // Zasilanie (INA226)
-    float    vbat;              // Napięcie pakietu w V
-    float    currentA;          // Prąd w A
-    float    powerW;            // Moc w W
-    bool     batteryLow;        // Flaga ostrzeżenia o niskim napięciu (< 19.8 V)
-    bool     powerOverload;     // Flaga ostrzeżenia o przeciążeniu (> 13 A / > 280 W)
+    // Czujnik IMU (BNO055)
+    float    headingDeg;        // Kurs kompasowy Yaw (0.0 - 359.9 deg)
+    bool     imuHealthy;        // Flaga poprawnej pracy czujnika BNO055
 
-    // Orientacja przestrzenna (BNO055)
-    float    yaw;               // Kurs kompasowy (0.0 - 359.9°)
-    bool     imuHealthy;        // Flaga poprawnej komunikacji z BNO055
+    // Odbiornik GPS
+    double   lat;               // Szerokość geograficzna (deg)
+    double   lon;               // Długość geograficzna (deg)
+    float    speedKmh;          // Prędkość SOG [km/h]
+    float    cogDeg;            // Kurs nad dnem COG [deg]
+    uint8_t  satellites;        // Liczba śledzonych satelitów
+    float    hdop;              // Współczynnik HDOP
+    uint32_t gpsAgeMs;          // Czas od ostatniej aktualizacji danych GPS [ms]
+    bool     gpsFixValid;       // Flaga poprawności pozycji
 
-    // Pozycjonowanie (GPS)
-    int32_t  gpsLat;            // Raw latitude (1e-6)
-    int32_t  gpsLon;            // Raw longitude (1e-6)
-    float    gpsSpeedMs;        // Prędkość SOG w m/s
-    float    gpsCourse;         // Kurs nad dnem COG w stopniach
-    uint8_t  gpsSats;           // Liczba śledzonych satelitów
-    bool     gpsFix;            // Flaga ważności pozycji GPS
+    // Wyjścia elementów wykonawczych (LEDC)
+    uint16_t escOutputUs;       // Rzeczywisty sygnał podawany na ESC (po rampie i ograniczeniach)
+    uint16_t servoOutputUs;     // Rzeczywisty sygnał podawany na serwo
 
-    // Bluetooth
-    bool     btActive;          // Czy moduł BT jest włączony sprzętowo
-    bool     btConnected;       // Czy klient jest połączony
-
-    // Metadane testu
-    char     propellerName[24]; // Nazwa testowanej śruby
-    char     testNote[32];      // Notatka do bieżącego testu
+    // Konfiguracja i metadane testu
+    uint16_t maxThrottlePwm;    // Limit programowy gazu (1000 - 2000 us, domyślnie 2000)
+    char     propellerName[16]; // Oznaczenie testowanej śruby (np. "PROP65", max 15 znaków)
+    char     testNote[32];      // Krótka notatka do nagłówka logu (max 31 znaków)
 };
