@@ -1,124 +1,267 @@
 #include "declarations.h"
 
-// Odwołania do instancji sprzętowych zdefiniowanych w Boat_WaterTest.ino
-extern INA226_WE ina226;
-extern Adafruit_BNO055 bno;
-extern TinyGPSPlus gps;
 
 /* =========================================================
- * INICJALIZACJA CZUJNIKÓW (I2C: INA226, BNO055 | UART: GPS)
+ * OBIEKTY ZDEFINIOWANE W Boat_WaterTest.ino
+ * ========================================================= */
+
+extern INA226_WE       ina226;
+extern Adafruit_BNO055 bno;
+extern TinyGPSPlus     gps;
+
+
+/* =========================================================
+ * STAN WEWNĘTRZNY MODUŁU
+ * ========================================================= */
+
+static bool ina226Healthy = false;
+
+
+/* =========================================================
+ * INICJALIZACJA WARTOŚCI SYSTEMOWYCH
+ * ========================================================= */
+
+static void resetSensorData() {
+    sys.voltageV = 0.0f;
+    sys.currentA = 0.0f;
+    sys.powerW   = 0.0f;
+
+    sys.headingDeg = 0.0f;
+    sys.imuHealthy = false;
+
+    sys.lat         = 0.0;
+    sys.lon         = 0.0;
+    sys.speedKmh    = 0.0f;
+    sys.cogDeg      = 0.0f;
+    sys.hdop        = 0.0f;
+    sys.gpsAgeMs    = UINT32_MAX;
+    sys.satellites  = 0;
+    sys.gpsFixValid = false;
+}
+
+
+/* =========================================================
+ * INICJALIZACJA CZUJNIKÓW
  * ========================================================= */
 
 void initSensors() {
-    // 1. Magistrala I2C (400 kHz dla szybkiego odczytu)
+    resetSensorData();
+
+    /* -----------------------------------------------------
+     * Magistrala I2C
+     * ----------------------------------------------------- */
+
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     Wire.setClock(400000);
 
-    // 2. Czujnik zasilania INA226
-    if (!ina226.init()) {
-        Serial.println("[SENS] Błąd: INA226 nie odpowiada na I2C!");
+
+    /* -----------------------------------------------------
+     * INA226
+     * ----------------------------------------------------- */
+
+    ina226Healthy = ina226.init();
+
+    if (ina226Healthy) {
+        ina226.setResistorRange(
+            INA226_SHUNT_OHMS,
+            INA226_MAX_CURRENT_A
+        );
+
+        ina226.setAverage(INA226_AVERAGING);
+        ina226.setConversionTime(INA226_CONVERSION_TIME);
+        ina226.setMeasureMode(INA226_CONTINUOUS);
+
+        Serial.println("[SENS] INA226 initialized");
     } else {
-        ina226.setResistorRange(INA226_SHUNT_OHMS, INA226_MAX_CURRENT);
-        ina226.setAverage(INA226_AVERAGE_16);
-        ina226.setConversionTime(INA226_CONV_TIME_1100);
-        Serial.println("[SENS] INA226 zainicjalizowany poprawnie.");
+        Serial.println("[SENS] INA226 not detected");
     }
 
-    // 3. Moduł IMU BNO055 (Adres 0x28)
-    if (!bno.begin()) {
-        Serial.println("[SENS] Błąd: BNO055 nie wykryty na magistrali I2C!");
-        sys.imuHealthy = false;
-    } else {
+
+    /* -----------------------------------------------------
+     * BNO055
+     * ----------------------------------------------------- */
+
+    sys.imuHealthy = bno.begin();
+
+    if (sys.imuHealthy) {
         bno.setExtCrystalUse(true);
-        sys.imuHealthy = true;
-        Serial.println("[SENS] BNO055 zainicjalizowany poprawnie.");
+        Serial.println("[SENS] BNO055 initialized");
+    } else {
+        Serial.println("[SENS] BNO055 not detected");
     }
 
-    // 4. Moduł GPS (HardwareSerial 2)
-    // GPIO 16 = RX, GPIO 17 = TX
-    Serial2.begin(GPS_BAUDRATE, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
-    Serial.println("[SENS] GPS Serial2 uruchomiony.");
 
-    // Stan początkowy w telemetrii
-    sys.vbat          = 0.0f;
-    sys.currentA      = 0.0f;
-    sys.powerW        = 0.0f;
-    sys.yaw           = 0.0f;
-    sys.gpsLat        = 0;
-    sys.gpsLon        = 0;
-    sys.gpsSpeedMs    = 0.0f;
-    sys.gpsCourse     = 0.0f;
-    sys.gpsSats       = 0;
-    sys.gpsFix        = false;
+    /* -----------------------------------------------------
+     * GPS
+     * ----------------------------------------------------- */
+
+    Serial2.begin(
+        GPS_BAUDRATE,
+        SERIAL_8N1,
+        PIN_GPS_RX,
+        PIN_GPS_TX
+    );
+
+    Serial.println("[SENS] GPS UART initialized");
 }
 
+
 /* =========================================================
- * GŁÓWNA AKTUALIZACJA SENSORÓW (Wywoływana w schedulerze: 10 Hz)
+ * ODCZYT GPS
+ * ========================================================= */
+
+static void updateGps() {
+
+    /* -----------------------------------------------------
+     * Opróżnienie bufora UART
+     * ----------------------------------------------------- */
+
+    while (Serial2.available() > 0) {
+        gps.encode((char)Serial2.read());
+    }
+
+
+    /* -----------------------------------------------------
+     * Pozycja i wiek danych
+     * ----------------------------------------------------- */
+
+    sys.gpsFixValid = gps.location.isValid();
+
+    if (sys.gpsFixValid) {
+        sys.lat      = gps.location.lat();
+        sys.lon      = gps.location.lng();
+        sys.gpsAgeMs = gps.location.age();
+    } else {
+        sys.lat      = 0.0;
+        sys.lon      = 0.0;
+        sys.gpsAgeMs = UINT32_MAX;
+    }
+
+
+    /* -----------------------------------------------------
+     * Prędkość
+     * ----------------------------------------------------- */
+
+    if (gps.speed.isValid()) {
+        sys.speedKmh = (float)gps.speed.kmph();
+    } else {
+        sys.speedKmh = 0.0f;
+    }
+
+
+    /* -----------------------------------------------------
+     * Kurs nad dnem
+     * ----------------------------------------------------- */
+
+    if (gps.course.isValid()) {
+        sys.cogDeg = (float)gps.course.deg();
+    } else {
+        sys.cogDeg = 0.0f;
+    }
+
+
+    /* -----------------------------------------------------
+     * HDOP
+     * ----------------------------------------------------- */
+
+    if (gps.hdop.isValid()) {
+        sys.hdop = (float)gps.hdop.hdop();
+    } else {
+        sys.hdop = 0.0f;
+    }
+
+
+    /* -----------------------------------------------------
+     * Liczba satelitów
+     * ----------------------------------------------------- */
+
+    if (gps.satellites.isValid()) {
+        const uint32_t satelliteCount = gps.satellites.value();
+
+        sys.satellites = (uint8_t)constrain(
+            satelliteCount,
+            0UL,
+            255UL
+        );
+    } else {
+        sys.satellites = 0;
+    }
+}
+
+
+/* =========================================================
+ * ODCZYT INA226
+ * ========================================================= */
+
+static void updateIna226() {
+    if (!ina226Healthy) {
+        sys.voltageV = 0.0f;
+        sys.currentA = 0.0f;
+        sys.powerW   = 0.0f;
+        return;
+    }
+
+    ina226.readAndClearFlags();
+
+    sys.voltageV = ina226.getBusVoltage_V();
+    sys.currentA = ina226.getCurrent_A();
+
+    // getBusPower() zwraca mW
+    sys.powerW = ina226.getBusPower() / 1000.0f;
+}
+
+
+/* =========================================================
+ * ODCZYT BNO055
+ * ========================================================= */
+
+static void updateBno055() {
+    if (!sys.imuHealthy) {
+        sys.headingDeg = 0.0f;
+        return;
+    }
+
+    sensors_event_t orientationData;
+
+    const bool readSuccessful = bno.getEvent(
+        &orientationData,
+        Adafruit_BNO055::VECTOR_EULER
+    );
+
+    if (!readSuccessful) {
+        sys.imuHealthy = false;
+        sys.headingDeg = 0.0f;
+        return;
+    }
+
+    float heading = orientationData.orientation.x;
+
+    if (!isfinite(heading)) {
+        sys.imuHealthy = false;
+        sys.headingDeg = 0.0f;
+        return;
+    }
+
+    while (heading < 0.0f) {
+        heading += 360.0f;
+    }
+
+    while (heading >= 360.0f) {
+        heading -= 360.0f;
+    }
+
+    sys.headingDeg = heading;
+}
+
+
+/* =========================================================
+ * GŁÓWNA AKTUALIZACJA SENSORÓW
+ *
+ * Wywoływana przez scheduler co TASK_SENSOR_MS.
  * ========================================================= */
 
 void updateSensors() {
-    // -----------------------------------------------------
-    // A. Opróżnianie bufora UART GPS (nieblokujące)
-    // -----------------------------------------------------
-    while (Serial2.available() > 0) {
-        gps.encode(Serial2.read());
-    }
-
-    // Aktualizacja danych GPS w strukturze systemowej
-    if (gps.location.isValid()) {
-        sys.gpsLat = gps.location.rawLat().deg * 1000000L + gps.location.rawLat().billionths / 1000L;
-        if (gps.location.rawLat().negative) {
-            sys.gpsLat = -sys.gpsLat;
-        }
-
-        sys.gpsLon = gps.location.rawLng().deg * 1000000L + gps.location.rawLng().billionths / 1000L;
-        if (gps.location.rawLng().negative) {
-            sys.gpsLon = -sys.gpsLon;
-        }
-
-        sys.gpsFix = true;
-    } else {
-        sys.gpsFix = false;
-    }
-
-    if (gps.speed.isValid()) {
-        sys.gpsSpeedMs = (float)gps.speed.mps();
-    } else {
-        sys.gpsSpeedMs = 0.0f;
-    }
-
-    if (gps.course.isValid()) {
-        sys.gpsCourse = (float)gps.course.deg();
-    }
-
-    if (gps.satellites.isValid()) {
-        sys.gpsSats = (uint8_t)gps.satellites.value();
-    } else {
-        sys.gpsSats = 0;
-    }
-
-    // -----------------------------------------------------
-    // B. Odczyt zasilania INA226
-    // -----------------------------------------------------
-    ina226.readAndClearFlags();
-    sys.vbat     = ina226.getBusVoltage_V();
-    sys.currentA = ina226.getCurrent_A();
-    sys.powerW   = ina226.getBusPower();
-
-    // -----------------------------------------------------
-    // C. Odczyt kursu z BNO055 (Eulera Yaw)
-    // -----------------------------------------------------
-    if (sys.imuHealthy) {
-        sensors_event_t orientationData;
-        bno.getEvent(&orientationData, Adafruit_BNO055::VECTOR_EULER);
-
-        // Oś X w układzie Eulera BNO055 to kąt kursowy Yaw (0.0 do 359.9°)
-        float heading = orientationData.orientation.x;
-        if (heading < 0.0f) {
-            heading += 360.0f;
-        } else if (heading >= 360.0f) {
-            heading -= 360.0f;
-        }
-        sys.yaw = heading;
-    }
+    updateGps();
+    updateIna226();
+    updateBno055();
 }
