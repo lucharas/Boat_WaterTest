@@ -42,8 +42,8 @@
 // Kanały CRSF (indeksowane 1-16)
 #define CRSF_CH_STEER       1       // Kanał 1: Ster (CH1)
 #define CRSF_CH_THRO        3       // Kanał 3: Gaz (CH3)
-#define CRSF_CH_MODE        6       // Kanał 6: Przełącznik SB (-100% DISARMED, 0% ARMED, 100% RECORDING)
-#define CRSF_CH_OVERRIDE    7       // Kanał 7: Przełącznik SC (Override limitu PWM do 100%)
+#define CRSF_CH_SB          6       // Kanał 6: Przełącznik SB (-100% DISARMED, 0% ARMED, 100% RECORDING)
+#define CRSF_CH_SC          7       // Kanał 7: Przełącznik SC (Override limitu PWM do 100%)
 
 // Wartości sygnałów RC po dekodowaniu do mikrosekund
 #define RC_MIN_US           1000
@@ -55,7 +55,7 @@
 #define RC_SW_HIGH_THRESHOLD_US  1700   // Powyżej: SB = +100% (RECORDING), pomiędzy: ARMED
 
 // Próg detekcji przełącznika SC (Override limitu PWM)
-#define RC_SW_OVERRIDE_TH_US     1600   // Powyżej: natychmiastowe 100% mocy bez limitu
+#define RC_SW_OVERRIDE_TH_US     1600   // Powyżej: no limits
 
 
 /* =========================================================
@@ -86,6 +86,8 @@
 #define INA226_I2C_ADDR     0x40
 #define INA226_SHUNT_OHMS   0.005f  // Bocznik R005 (5 mOhm)
 #define INA226_MAX_CURRENT  25.0f   // Maksymalny oczekiwany prąd (A)
+#define INA226_AVERAGING       INA226_AVERAGE_16
+#define INA226_CONVERSION_TIME INA226_CONV_TIME_1100
 
 // BNO055
 #define BNO055_I2C_ADDR     0x28
@@ -97,8 +99,6 @@
 /* =========================================================
  * BUFOR I LOGOWANIE
  * ========================================================= */
-
-#define LOG_RATE_HZ         5
 
 // 3000 próbek * 32 bajty = 96 000 B w pamięci RAM (10 minut testu przy 5 Hz)
 #define MAX_SAMPLES         3000
