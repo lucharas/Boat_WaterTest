@@ -1,874 +1,228 @@
-# Specyfikacja projektu: Boat_WaterTest (ESP32 / Arduino IDE)
+**Boat_WaterTest - specyfikacja projektu**
+ver.17.10.2026
 
-**Wersja:** 15.10.2026  
-**Platforma:** ESP32-WROOM-32D (NodeMCU / DevKit V1), Arduino IDE (ESP32 Core v3.3.7)  
-**Cel:** Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podczas testów wodnych z możliwością badania różnych śrub napędowych przy zadanym limicie PWM gazu.  
-**Architektura:** Proceduralna / modularna, jawny automat stanów (FSM), wspólna struktura danych `SystemData`, brak alokacji dynamicznej, statyczny bufor RAM, nieblokujący scheduler oparty na `millis()`.
+**Cel**
 
----
+Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podczas testów różnych śrub i limitów PWM. Dane są zapisywane do RAM i zrzucane przez USB lub Bluetooth.
 
-# 1. Komponenty sprzętowe i magistrale
+**Platforma i architektura**
 
-- **Mikrokontroler:** ESP32-WROOM-32D
-- **Odbiornik RC:** BETAFPV SuperD ELRS 2.4 GHz (CRSF, Serial1, 420000 baud)
-- **Aparatura:** RadioMaster Pocket (EdgeTX / ExpressLRS)
+- ESP32-WROOM-32D, Arduino IDE, ESP32 Core 3.3.7
+- Architektura proceduralna i modularna
+- Jawna maszyna stanów
+- Wspólna struktura SystemData
+- Brak dynamicznej alokacji pamięci
+- Statyczny bufor logów w RAM
+- Scheduler nieblokujący oparty na millis()
+- Bez delay() poza konieczną inicjalizacją w setup()
 
-### Mapowanie kanałów RC
+**Sprzęt**
 
-| Kanał | Funkcja |
-|---------|---------|
-| CH1 | Ster (Rudder) |
-| CH3 | Gaz (Throttle) |
-| CH5 | ARM |
-| CH6 (SB) | Włączanie/wyłączanie Bluetooth |
-| CH7 (SC) | Natychmiastowy override limitu PWM do 100% |
-
-### Sensory
-
-- **INA226** (I2C, bocznik 5 mΩ)
-- **BNO055** (I2C)
-- **GPS** (Serial2, 38400 baud, TinyGPS++)
-
-### Elementy wykonawcze
-
-- ESC Flycolor 90A
-- Silnik A28M-IPX8 2838 350KV
+- Odbiornik BETAFPV SuperD ELRS 2.4 GHz, CRSF, Serial1, 420000 baud
+- Aparatura RadioMaster Pocket, EdgeTX, ExpressLRS
+- INA226, I2C, bocznik 5 mΩ
+- BNO055, I2C
+- GPS, Serial2, 38400 baud, TinyGPS++
+- ESC Flycolor 90 A
+- Silnik A28M-IPX8 2838 350 KV
 - Serwo steru
-- PWM generowane przez LEDC ESP32
+- NeoPixel WS2812B, 1 szt.
+- Bluetooth Classic SPP, BluetoothSerial
 
-### Interfejs użytkownika
+**Kanały RC**
 
-- NeoPixel WS2812B ×1
-- Bluetooth Classic SPP (`BluetoothSerial`)
+- CH1 - ster
+- CH3 - gaz
+- CH6, SB - sterowanie stanami: -100% DISARMED, 0% ARMED, 100% RECORDING
+- CH7, SC - natychmiastowe obejście limitu PWM do 100%
 
----
+**Piny ESP32**
 
-# 2. Mapa pinów ESP32
+- GPIO34 - CRSF RX
+- GPIO32 - CRSF TX
+- GPIO18 - ESC
+- GPIO19 - serwo
+- GPIO16 - GPS RX
+- GPIO17 - GPS TX
+- GPIO21 - I2C SDA
+- GPIO22 - I2C SCL
+- GPIO23 - NeoPixel
 
-| Nazwa | GPIO | Opis |
-|---------|---------|---------|
-| PIN_ELRS_RX | 34 | Serial1 RX |
-| PIN_ELRS_TX | 32 | Serial1 TX |
-| PIN_ESC | 18 | PWM ESC |
-| PIN_SERVO | 19 | PWM serwo |
-| PIN_GPS_RX | 16 | Serial2 RX |
-| PIN_GPS_TX | 17 | Serial2 TX |
-| PIN_I2C_SDA | 21 | SDA |
-| PIN_I2C_SCL | 22 | SCL |
-| PIN_NEOPIXEL | 23 | WS2812B |
+- GPIO6-11 są zajęte przez pamięć Flash
+- GPIO0, 2, 5, 12 i 15 nie mogą sterować ESC ani serwem
+- GPIO34 jest tylko wejściem, więc nadaje się do CRSF RX
 
----
+**Struktura projektu**
 
-# 3. Struktura projektu
+- Boat_WaterTest.ino - setup(), obiekty globalne, bufor logów i scheduler
+- config.h - piny, progi, parametry RC i czasy zadań
+- types.h - stany, przyczyny failsafe i struktury danych
+- declarations.h - prototypy funkcji używanych między zakładkami
+- drv_RC.ino - CRSF, kanały, LQ, RSSI i stan linku
+- drv_Actuators.ino - ESC i serwo
+- drv_Sensors.ino - GPS, INA226 i BNO055
+- logic_FSM.ino - maszyna stanów
+- logic_Safety.ino - zabezpieczenia
+- log_Data.ino - zapis próbek i eksport CSV
+- hmi_BT.ino - konsola Bluetooth i komendy
+- hmi_Status.ino - NeoPixel
 
-```text
-Boat_WaterTest/
-├── Boat_WaterTest.ino
-├── config.h
-├── types.h
-├── declarations.h
-├── drv_RC.ino
-├── drv_Actuators.ino
-├── drv_Sensors.ino
-├── logic_FSM.ino
-├── logic_Safety.ino
-├── log_Data.ino
-├── hmi_BT.ino
-└── hmi_Status.ino
-```
+**Stany**
 
-## Boat_WaterTest.ino
+- STATE_BOOT - inicjalizacja i uzbrajanie ESC
+- STATE_DISARMED - silnik odcięty, oczekiwanie na SB = 0%
+- STATE_ARMED - sterowanie aktywne, bez zapisu próbek
+- STATE_RECORDING - sterowanie aktywne i zapis danych
+- STATE_FAILSAFE - awaryjne odcięcie silnika
+- STATE_BT_DUMP - tryb serwisowy; priorytetem jest obsługa Bluetooth
 
-- Inicjalizacja sprzętu.
-- Definicje instancji bibliotek.
-- Alokacja bufora logów.
-- Implementacja nieblokującego schedulera.
+**Przejścia stanów**
 
-## config.h
+- Zasilanie lub reset prowadzi do STATE_BOOT
+- STATE_BOOT zawsze przechodzi automatycznie do STATE_DISARMED po ESC_ARM_TIME
+- STATE_DISARMED przechodzi do STATE_BT_DUMP po komendzie BTDUMP odebranej przez Bluetooth
+- STATE_BT_DUMP wraca do STATE_DISARMED po komendzie EXIT
+- STATE_DISARMED przechodzi do STATE_ARMED, gdy link RC jest poprawny i SB = 0%
+- STATE_ARMED przechodzi do STATE_RECORDING, gdy SB = 100%
+- STATE_ARMED przechodzi do STATE_DISARMED, gdy SB = -100%
+- STATE_RECORDING przechodzi do STATE_ARMED, gdy SB = 0% albo bufor RAM jest pełny
+- STATE_RECORDING przechodzi do STATE_DISARMED, gdy SB = -100%
+- Utrata RC albo krytyczne napięcie, prąd lub moc powodują przejście do STATE_FAILSAFE
+- STATE_FAILSAFE wraca do STATE_DISARMED dopiero po ustaniu błędu, odzyskaniu linku i ustawieniu SB = -100%
 
-- Definicje pinów.
-- Progi alarmowe.
-- Parametry RC.
-- Parametry schedulera.
+Failsafe ma pierwszeństwo przed maszyną stanów, logowaniem i Bluetooth.
 
-## types.h
+**Sterowanie ESC i serwem**
 
-- Enumeracje stanów.
-- Enumeracje failsafe.
-- Struktury danych.
+- PWM: LEDC, 50 Hz, 16 bit
+- ESC podczas startu otrzymuje 1000 us przez ESC_ARM_TIME, domyślnie 3000 ms
+- ESC_DEADZONE_US = 1180
+- ESC_MAX_US = 2000
+- Poniżej deadzone wyjście ESC jest wymuszane na 1000 us
+- Wzrost sygnału ESC jest ograniczony rampą rozbiegu; jej wartość zostanie dobrana podczas testów
+- Zmniejszenie gazu może być natychmiastowe; DISARMED i FAILSAFE zawsze odcinają silnik bez rampy
+- W STATE_BOOT, STATE_DISARMED, STATE_FAILSAFE i STATE_BT_DUMP silnik jest zawsze odcięty
+- Po utracie RC gaz = 1000 us, ster = 1500 us
 
-## declarations.h
+**Limit PWM**
 
-- Prototypy wszystkich funkcji współdzielonych.
+- Maksymalne PWM jest ustawiane komendą Bluetooth i przechowywane w SystemData
+- Zakres gazu jest mapowany do zakresu ESC_DEADZONE_US...maxThrottlePwm
+- Gdy SC jest w pozycji wysokiej, limit jest pomijany, a maksimum wynosi 2000 us
+- Po resecie domyślny maxThrottlePwm wynosi 2000 us
 
-## drv_RC.ino
+**Sensory i dane bieżące**
 
-- Obsługa ELRS / CRSF.
+- GPS: pozycja, prędkość, COG, liczba satelitów, HDOP, wiek fixa i ważność fixa
+- BNO055: kurs 0,0...359,9 stopnia oraz stan sensora
+- INA226: napięcie, prąd i moc
+- RC: kanały, stan linku, LQ i RSSI
+- SystemData przechowuje również stan FSM, limit PWM, stan Bluetooth i metadane testu
 
-## drv_Actuators.ino
+**Bezpieczeństwo**
 
-- Obsługa ESC i serwa.
+- Ostrzeżenie: prąd > 13 A lub moc > 280 W
+- Failsafe: napięcie < 19,2 V
+- Failsafe: prąd > 16 A lub moc > 330 W przez ponad 250 ms
+- Przyczyna failsafe jest zapisywana w FailsafeReason
 
-## drv_Sensors.ino
+**Logowanie**
 
-- Odczyt GPS.
-- Odczyt INA226.
-- Odczyt BNO055.
+- Logowanie działa tylko w STATE_RECORDING
+- Częstotliwość zapisu: 5 Hz
+- MAX_SAMPLES = 3000
+- Rekord ma docelowo 32 B, więc bufor zajmuje około 96 kB RAM
+- Wartości całkowite: napięcie w mV, prąd w mA, prędkość w cm/s, kąty w 0,1 stopnia
+- Zapełnienie bufora kończy nagrywanie i przełącza system do STATE_ARMED
 
-## logic_FSM.ino
+- Metadane CSV: wersja firmware, śruba, ustawiony limit PWM, notatka i liczba próbek
+- Dane CSV: czas, pozycja, napięcie, prąd, moc, prędkość, yaw, COG, PWM gazu, PWM steru, satelity, HDOP i wiek danych GPS
+- Zrzut jest możliwy przez USB Serial lub Bluetooth
 
-- Automat stanów.
-
-## logic_Safety.ino
-
-- Monitor bezpieczeństwa.
-
-## log_Data.ino
-
-- Rejestracja danych.
-- Eksport CSV.
-
-## hmi_BT.ino
-
-- Konsola Bluetooth.
-
-## hmi_Status.ino
-
-- Sygnalizacja NeoPixel.
-
----
-
-# 4. Parametry konfiguracyjne (config.h)
-
-## Kanały CRSF
-
-```cpp
-#define CRSF_CH_STEER      1
-#define CRSF_CH_THRO       3
-#define CRSF_CH_SW_SB      6
-#define CRSF_CH_SW_SC      7
-```
-
-## Progi sterowania
+**Struktura próbki**
 
 ```cpp
-#define THRO_ARM_THRESHOLD_US      1080
-#define ESC_DEADZONE_US            1180
-#define ESC_MAX_US                 2000
-
-#define RC_SW_LOW_THRESHOLD_US     1300
-#define RC_SW_HIGH_THRESHOLD_US    1700
-```
-
-## LiPo 6S
-
-```cpp
-#define VBAT_WARN_V     19.8f
-#define VBAT_FAIL_V     19.2f
-```
-
-## Ochrona przeciążeniowa
-
-### Ostrzeżenie
-
-```text
-I > 13 A
-lub
-P > 280 W
-```
-
-### Failsafe
-
-```text
-I > 16 A
-lub
-P > 330 W
-
-czas trwania > 250 ms
-```
-
-## Bufor próbek
-
-```cpp
-#define MAX_SAMPLES 3000
-```
-
-Przy strukturze 32 B oznacza to:
-
-```text
-3000 × 32 B = 96 000 B
-≈ 96 kB RAM
-```
-
-## Scheduler
-
-| Zadanie | Częstotliwość | Interwał |
-|---------|---------|---------|
-| RC | 50 Hz | 20 ms |
-| Aktuatory | 50 Hz | 20 ms |
-| Sensory | 10 Hz | 100 ms |
-| Logowanie | 5 Hz | 200 ms |
-| NeoPixel | 20 Hz | 50 ms |
-
----
-
-# 5. Definicje typów (types.h)
-
-## BoatState
-
-```cpp
-enum BoatState : uint8_t
-{
-    STATE_BOOT,
-    STATE_DISARMED,
-    STATE_ARMED,
-    STATE_RECORDING,
-    STATE_FAILSAFE,
-    STATE_BT_DUMP
+struct LogSample {
+    uint32_t timestampMs;
+    int32_t  lat;
+    int32_t  lon;
+    uint16_t voltageMv;
+    int16_t  currentMa;
+    uint16_t powerDeciW;
+    uint16_t speedCms;
+    uint16_t headingDeg10;
+    uint16_t cogDeg10;
+    uint16_t pwmThrottle;
+    uint16_t pwmRudder;
+    uint8_t  satellites;
+    uint16_t hdop100;
+    uint8_t  gpsAge100ms;
 };
 ```
 
-## FailsafeReason
+- lat i lon są skalowane przez 1e-6
+- powerDeciW przechowuje moc w 0,1 W
+- headingDeg10 i cogDeg10 przechowują kąt w 0,1 stopnia
+- hdop100 przechowuje HDOP pomnożony przez 100, np. 0,85 jako 85
+- gpsAge100ms przechowuje wiek danych GPS w jednostkach 100 ms; wartość jest ograniczana do 255, czyli 25,5 s
+- Liczba satelitów, HDOP i wiek danych pozwalają ocenić jakość każdej próbki GPS
+- Struktura zajmuje 32 B bez pola flag
+- Rozmiar należy potwierdzić przez static_assert(sizeof(LogSample) == 32)
+
+**Bluetooth i komendy**
+
+- Nazwa urządzenia: Boat_Telemetry
+- Bluetooth służy do konfiguracji, diagnostyki i zrzutu danych
+- W STATE_DISARMED Bluetooth nasłuchuje komendy BTDUMP
+- W STATE_BT_DUMP sterowanie silnikiem i serwem oraz zapis danych są wyłączone
+- Bluetooth jest wyłączony podczas STATE_RECORDING
+
+- BTDUMP - przechodzi z STATE_DISARMED do STATE_BT_DUMP
+- STATUS - zwraca stan FSM, RC, GPS, MAG, V_BAT, prąd, moc, zajętość bufora, limit PWM i dane śruby
+- PWM1450 - ustawia maksymalne PWM ESC
+- PROP65 - zapisuje oznaczenie lub rozmiar śruby w metadanych logu
+- NOTEipsumipsum - zapisuje krótką notatkę w metadanych
+- DUMP - wysyła metadane i dane CSV
+- CLEAR - zeruje licznik próbek i logicznie czyści bufor
+- EXIT - kończy STATE_BT_DUMP i przechodzi do STATE_DISARMED
+- HELP - wyświetla krótką listę komend
+
+Komendy mają jedną stałą składnię, bez spacji i aliasów. Wielkość liter nie ma znaczenia.
+
+**Ustawienia testu**
+
+- Limit PWM, oznaczenie śruby i notatka są przechowywane tylko w RAM
+- Wejście do STATE_BT_DUMP, wykonanie DUMP i komenda CLEAR nie zmieniają tych ustawień
+- CLEAR zeruje wyłącznie licznik próbek i logicznie czyści bufor logu
+- Po resecie ustawienia wracają do wartości domyślnych
+
+**Scheduler**
+
+- RC - 50 Hz, 20 ms
+- Aktuatory - 50 Hz, 20 ms
+- Sensory - 10 Hz, 100 ms
+- Logowanie - 5 Hz, 200 ms
+- NeoPixel - 20 Hz, 50 ms
+- Bluetooth w STATE_DISARMED i STATE_BT_DUMP - obsługiwany w każdej iteracji loop(), bez czekania na wolny interwał
+
+**Sygnalizacja NeoPixel**
+
+- STATE_BOOT - białe błyski
+- STATE_DISARMED - zielony oddech
+- STATE_ARMED - stały zielony
+- STATE_RECORDING - szybkie błyski fioletowo-niebieskie
+- STATE_FAILSAFE - szybkie czerwone miganie
+- STATE_BT_DUMP - stały niebieski
+- Brak fixa GPS może modyfikować sygnalizację stanu, ale nie powinien całkowicie zastępować informacji o stanie FSM
+- statusLed.show() jest wywoływane tylko po zmianie koloru
+
+**Rygory implementacyjne**
+
+- loop() zawiera wyłącznie wywołania schedulera i obsługę zadań
+- Brak delay() w loop(), sterowaniu, sensorach i Bluetooth
+- Wszystkie funkcje używane między zakładkami mają prototyp w declarations.h
+- Obiekty bibliotek i bufory są definiowane jeden raz w Boat_WaterTest.ino, a w pozostałych plikach udostępniane przez extern
+- Rejestracja odbywa się wyłącznie do RAM
+- Nie używać przerwań, dopóki pomiary nie wykażą, że scheduler nie spełnia wymagań czasowych
 
-```cpp
-enum FailsafeReason : uint8_t
-{
-    FAILSAFE_NONE,
-    FAILSAFE_RC_LOST,
-    FAILSAFE_BATTERY_LOW,
-    FAILSAFE_OVERCURRENT,
-    FAILSAFE_OVERPOWER
-};
-```
 
-## LogSample
-
-Struktura rekordu logu:
-
-```cpp
-#pragma pack(push,1)
-
-struct LogSample
-{
-    ...
-};
-
-#pragma pack(pop)
-
-static_assert(sizeof(LogSample) == 32);
-```
-
-Założenia:
-
-- napięcie → mV
-- prąd → mA
-- prędkość → cm/s
-- kąty → 0.1°
-
-## SystemData
-
-Przechowuje:
-
-- aktualny stan FSM,
-- dane GPS,
-- kurs IMU,
-- napięcie,
-- prąd,
-- moc,
-- kanały RC,
-- LQ,
-- RSSI,
-- limit PWM,
-- metadane testu,
-- stan Bluetooth.
-
----
-
-# 6. declarations.h
-
-Wszystkie funkcje wywoływane między zakładkami muszą posiadać prototyp.
-
-Przykłady:
-
-```cpp
-void processRC();
-void processSensors();
-void updateFSM();
-void updateSafety();
-
-void startBT();
-void stopBT();
-
-void dumpLog(Print& stream);
-```
-
----
-
-# 7. Boat_WaterTest.ino
-
-## Bufor logów
-
-```cpp
-LogSample logBuffer[MAX_SAMPLES];
-
-uint16_t sampleCount = 0;
-```
-
-## Obiekty globalne
-
-```cpp
-BluetoothSerial serialBT;
-TinyGPSPlus gps;
-
-Adafruit_NeoPixel statusLed(...);
-
-INA226_WE ina226(...);
-Adafruit_BNO055 bno(...);
-```
-
-## setup()
-
-- USB Serial 115200
-- GPS Serial2 38400
-- CRSF Serial1 420000
-- I2C 400 kHz
-- LEDC PWM
-- Bluetooth
-- inicjalizacja sensorów
-- `maxThrottlePwm = 2000`
-
-## loop()
-
-Wyłącznie scheduler oparty o `millis()`.
-
----
-
-# 8. drv_RC.ino
-
-Funkcje:
-
-- odczyt CRSF,
-- CH1,
-- CH3,
-- CH6,
-- CH7,
-- LQ,
-- RSSI,
-- `isLinkUp()`.
-
-Przy utracie linku:
-
-```text
-Throttle → 1000 us
-Ster → 1500 us
-```
-
----
-
-# 9. drv_Actuators.ino
-
-PWM:
-
-```cpp
-ledcAttach(...)
-ledcWrite(...)
-```
-
-Parametry:
-
-```text
-50 Hz
-16 bit
-```
-
-## Uzbrajanie ESC
-
-```text
-1000 us przez 3000 ms
-```
-
-## Deadzone
-
-```cpp
-ESC_DEADZONE_US = 1180
-```
-
-Jeżeli sygnał niższy:
-
-```text
-wymuś 1000 us
-```
-
-## Silnik zawsze odcięty w:
-
-- STATE_BOOT
-- STATE_DISARMED
-- STATE_FAILSAFE
-- STATE_BT_DUMP
-
----
-
-# 10. drv_Sensors.ino
-
-## INA226
-
-Odczyt:
-
-- napięcie
-- prąd
-- moc
-
-## BNO055
-
-Odczyt:
-
-```text
-Yaw 0.0°...359.9°
-```
-
-## GPS
-
-Dane:
-
-- latitude
-- longitude
-- speed m/s
-- course over ground
-- liczba satelitów
-
----
-
-# 11. FSM (logic_FSM.ino)
-
-## Przejścia stanów
-
-```text
-BOOT
-  └─> DISARMED
-
-DISARMED
-  └─> ARMED
-
-ARMED
-  └─> RECORDING
-
-RECORDING
-  └─> ARMED
-
-ANY STATE
-  └─> FAILSAFE
-
-DISARMED / ARMED
-  └─> BT_DUMP
-```
-
-## BOOT → DISARMED
-
-Warunek:
-
-```text
-3000 ms
-ESC = 1000 us
-```
-
-## DISARMED → ARMED
-
-Warunki:
-
-```text
-RC Link OK
-Brak alarmów
-Throttle <= 1080 us
-przez minimum 2000 ms
-```
-
-## ARMED → RECORDING
-
-```text
-Throttle > 1080 us
-```
-
-## RECORDING → ARMED
-
-```text
-Throttle <= 1080 us
-```
-
-lub
-
-```text
-sampleCount >= MAX_SAMPLES
-```
-
----
-
-# 12. Limit PWM i override SC
-
-Standardowo:
-
-```text
-1080...2000 us
-```
-
-mapowane na:
-
-```text
-ESC_DEADZONE_US
-...
-maxThrottlePwm
-```
-
-## Przełącznik SC
-
-Jeżeli:
-
-```text
-SC > 1700 us
-```
-
-to:
-
-```text
-limit PWM ignorowany
-```
-
-i:
-
-```text
-maksimum = 2000 us
-```
-
----
-
-# 13. Zarządzanie Bluetooth
-
-## RECORDING
-
-```text
-Bluetooth OFF
-```
-
-## DISARMED / ARMED
-
-Stan zgodny z przełącznikiem SB.
-
-## FAILSAFE
-
-```text
-Bluetooth ON
-```
-
-## BT_DUMP
-
-```text
-Bluetooth ON
-```
-
----
-
-# 14. Safety
-
-## Utrata RC
-
-```text
-Throttle = 1000 us
-Ster = 1500 us
-FAILSAFE_RC_LOST
-```
-
-## Niskie napięcie
-
-```text
-VBAT < 19.2 V
-```
-
-↓
-
-```text
-FAILSAFE_BATTERY_LOW
-```
-
-## Przeciążenie
-
-```text
-I > 16 A
-```
-
-lub
-
-```text
-P > 330 W
-```
-
-przez:
-
-```text
->250 ms
-```
-
-↓
-
-```text
-FAILSAFE_OVERCURRENT
-```
-
-lub
-
-```text
-FAILSAFE_OVERPOWER
-```
-
----
-
-# 15. log_Data.ino
-
-## Częstotliwość próbkowania
-
-```text
-5 Hz
-```
-
-tylko w stanie:
-
-```text
-STATE_RECORDING
-```
-
-## Format CSV
-
-### Metadane
-
-```text
-# Firmware
-# Propeller
-# Note
-# Total Samples
-```
-
-### Nagłówek danych
-
-```csv
-time_ms,lat,lon,vbat_v,current_a,power_w,speed_mps,yaw_deg,cog_deg,pwm_thro,pwm_rudder,sats,flags
-```
-
-## Zrzut
-
-```cpp
-dumpLog(Print& stream)
-```
-
-Obsługiwane strumienie:
-
-```text
-Serial
-SerialBT
-```
-
----
-
-# 16. hmi_BT.ino
-
-Nazwa urządzenia:
-
-```text
-Boat_Telemetry
-```
-
-## Komendy
-
-### Ustawienie PWM
-
-```text
-PWM 1450
-SET PWM 1450
-```
-
-### PWM procentowy
-
-```text
-PWM80
-```
-
-Przykład:
-
-```text
-PWM80
-```
-
-Zapisuje etykietę:
-
-```text
-pwm80
-```
-
-### Nazwa śruby
-
-```text
-SET PROP M445
-```
-
-### Notatka
-
-```text
-SET NOTE Test pod wiatr
-```
-
-### Status
-
-```text
-STATUS
-```
-
-### Zrzut CSV
-
-```text
-DUMP
-```
-
-### Kasowanie danych
-
-```text
-CLEAR
-```
-
----
-
-# 17. hmi_Status.ino
-
-Wywoływane:
-
-```text
-20 Hz
-co 50 ms
-```
-
-## Optymalizacja
-
-```cpp
-statusLed.show();
-```
-
-wyłącznie przy rzeczywistej zmianie RGB.
-
-## Sygnalizacja
-
-| Stan | Kolor |
-|--------|--------|
-| GPS brak fixa | bursztynowy oddech |
-| BOOT | białe błyski |
-| DISARMED | zielony oddech |
-| ARMED | stały zielony |
-| RECORDING | szybkie błyski fioletowo-niebieskie |
-| FAILSAFE | szybkie czerwone miganie |
-| BT_DUMP | stały niebieski |
-
----
-
-# 18. Rygory implementacyjne
-
-## Bezwzględny zakaz
-
-```cpp
-delay()
-```
-
-w:
-
-- loop()
-- modułach wykonawczych
-- obsłudze sensorów
-- obsłudze Bluetooth
-
-Wyjątek stanowi jedynie ewentualna inicjalizacja sprzętu w `setup()`.
-
-## Architektura Arduino IDE
-
-### Tylko w Boat_WaterTest.ino
-
-```cpp
-#include <...>
-```
-
-oraz:
-
-```cpp
-BluetoothSerial
-TinyGPSPlus
-INA226_WE
-Adafruit_BNO055
-Adafruit_NeoPixel
-```
-
-### Pozostałe moduły
-
-```cpp
-#include "declarations.h"
-```
-
-i korzystanie z:
-
-```cpp
-extern
-```
-
-## Prototypy
-
-Wszystkie funkcje współdzielone muszą zostać zadeklarowane w:
-
-```cpp
-declarations.h
-```
-
----
-
-# 19. Ograniczenia GPIO ESP32
-
-## Niedozwolone
-
-```text
-GPIO 6-11
-```
-
-(zajęte przez SPI Flash)
-
-## Niedozwolone dla ESC i serwa
-
-```text
-GPIO 0
-GPIO 2
-GPIO 5
-GPIO 12
-GPIO 15
-```
-
-(piny strappingowe)
-
-## Wejścia tylko INPUT
-
-```text
-GPIO 34
-GPIO 35
-GPIO 36
-GPIO 39
-```
-
-Dlatego:
-
-```text
-GPIO34 = CRSF RX
-```
-
-jest poprawnym wykorzystaniem.
-
----
-
-# 20. Założenia architektoniczne końcowe
-
-- Brak dynamicznej alokacji pamięci.
-- Całość działa deterministycznie w oparciu o `millis()`.
-- Wszystkie dane wymieniane przez strukturę `SystemData`.
-- Rejestracja wyłącznie do RAM.
-- Eksport danych przez Bluetooth SPP lub USB.
-- Bluetooth automatycznie wyłączany podczas testu na wodzie.
-- Przełącznik SC zapewnia natychmiastowe obejście limitu PWM.
-- Failsafe zawsze ma najwyższy priorytet względem logowania, Bluetooth i FSM.
