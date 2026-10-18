@@ -130,4 +130,26 @@ void updateStatus() {
      * ===================================================== */
 
     if (sys.state == STATE_FAILSAFE) {
-        if ((
+        if ((now / 100) % 2 == 0) {
+            red = 255;
+        }
+    } else if (sys.state == STATE_BOOT) {
+        if ((now / 100) % 10 == 0) {
+            red = 255; green = 255; blue = 255;
+        }
+    } else if (sys.state == STATE_DISARMED) {
+        float breath = (exp(sin(now / 2000.0 * PI)) - 0.36787944) * 108.0;
+        green = constrain(breath, 0, 255);
+    } else if (sys.state == STATE_ARMED) {
+        green = 255;
+    } else if (sys.state == STATE_RECORDING) {
+        if ((now / 100) % 2 == 0) {
+            red = 128; blue = 255;
+        }
+    } else if (sys.state == STATE_BT_DUMP) {
+        blue = 255;
+    }
+
+    applyGpsWarning(red, green, blue);
+    setPixelIfChanged(red, green, blue);
+}
