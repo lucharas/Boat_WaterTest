@@ -335,5 +335,73 @@ static void handlePropCommand(const char* valueText) {
     sys.propellerName[
         sizeof(sys.propellerName) - 1
     ] = '\0';
+// (ciąg dalszy uciętego pliku z komendą PROP)
+}
 
+static void handleNoteCommand(const char* valueText) {
+    if (valueText == nullptr || *valueText == '\0') {
+        SerialBT.println(F("ERR: EMPTY NOTE"));
+        return;
+    }
+    if (strlen(valueText) >= sizeof(sys.testNote)) {
+        SerialBT.println(F("ERR: NOTE TOO LONG"));
+        return;
+    }
+    strncpy(sys.testNote, valueText, sizeof(sys.testNote));
+    sys.testNote[sizeof(sys.testNote) - 1] = '\0';
+    SerialBT.println(F("OK: NOTE SAVED"));
+}
+
+static void processBtCommand(const char* cmd) {
+    if (strcasecmp(cmd, "BTDUMP") == 0) {
+        if (sys.state == STATE_DISARMED) {
+            setState(STATE_BT_DUMP);
+            SerialBT.println(F("OK: BT_DUMP ENTERED"));
+        } else {
+            SerialBT.println(F("ERR: MUST BE DISARMED"));
+        }
+    } else if (strcasecmp(cmd, "STATUS") == 0) {
+        printStatus(SerialBT);
+    } else if (strncasecmp(cmd, "PWM", 3) == 0) {
+        handlePwmCommand(cmd + 3);
+    } else if (strncasecmp(cmd, "PROP", 4) == 0) {
+        handlePropCommand(cmd + 4);
+        SerialBT.println(F("OK: PROP SAVED"));
+    } else if (strncasecmp(cmd, "NOTE", 4) == 0) {
+        handleNoteCommand(cmd + 4);
+    } else if (strcasecmp(cmd, "DUMP") == 0) {
+        dumpLog(SerialBT);
+    } else if (strcasecmp(cmd, "CLEAR") == 0) {
+        clearLog();
+        SerialBT.println(F("OK: CLEARED"));
+    } else if (strcasecmp(cmd, "EXIT") == 0) {
+        if (sys.state == STATE_BT_DUMP) {
+            setState(STATE_DISARMED);
+            SerialBT.println(F("OK: EXIT"));
+        }
+    } else if (strcasecmp(cmd, "HELP") == 0) {
+        printHelp(SerialBT);
+    } else {
+        SerialBT.println(F("ERR: UNKNOWN COMMAND"));
+    }
+}
+
+void updateBT() {
+    if (!sys.btActive) return;
+    
+    while (SerialBT.available() > 0) {
+        char c = (char)SerialBT.read();
+        if (c == '\n' || c == '\r') {
+            if (btRxIndex > 0) {
+                btRxBuffer[btRxIndex] = '\0';
+                processBtCommand(btRxBuffer);
+                btRxIndex = 0;
+            }
+        } else {
+            if (btRxIndex < sizeof(btRxBuffer) - 1) {
+                btRxBuffer[btRxIndex++] = c;
+            }
+        }
+    }
+}
  
