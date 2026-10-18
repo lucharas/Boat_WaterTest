@@ -22,7 +22,7 @@ Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podcz
 - Aparatura RadioMaster Pocket, EdgeTX, ExpressLRS
 - INA226, I2C, bocznik 5 mΩ
 - BNO055, I2C
-- GPS, Serial2, 38400 baud, TinyGPS++
+- GPS, Serial2, 38400 baud, TinyGPS++, ograniczyć ramkę do niezbędnego minimum, np: $GPRMC i $GPGGA
 - ESC Flycolor 90 A
 - Silnik A28M-IPX8 2838 350 KV
 - Serwo steru
@@ -87,7 +87,8 @@ Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podcz
 - STATE_ARMED przechodzi do STATE_DISARMED, gdy SB = -100%
 - STATE_RECORDING przechodzi do STATE_ARMED, gdy SB = 0% albo bufor RAM jest pełny
 - STATE_RECORDING przechodzi do STATE_DISARMED, gdy SB = -100%
-- Utrata RC albo krytyczne napięcie, prąd lub moc powodują przejście do STATE_FAILSAFE
+- Utrata RC albo prąd lub moc powodują przejście do STATE_FAILSAFE
+- Niskie napięcie nie powoduje przejścia do failsafe, jedynie sygnalizacje diodą
 - STATE_FAILSAFE wraca do STATE_DISARMED dopiero po ustaniu błędu, odzyskaniu linku i ustawieniu SB = -100%
 
 Failsafe ma pierwszeństwo przed maszyną stanów, logowaniem i Bluetooth.
