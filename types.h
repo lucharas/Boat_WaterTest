@@ -32,7 +32,6 @@ enum FailsafeReason : uint8_t {
 
 /* =========================================================
  * STRUKTURA PRÓBKI LOGU
- *
  * Rozmiar: dokładnie 32 B
  * Bufor: 3000 x 32 B = 96 000 B
  * ========================================================= */
@@ -112,6 +111,7 @@ struct SystemData {
 
     float headingDeg;           // Kurs 0,0...359,9 stopnia
     bool  imuHealthy;           // Poprawny stan sensora
+    uint8_t magCalib;           // Jakość kalibracji magnetometru (0-3)
 
 
     /* -----------------------------------------------------
