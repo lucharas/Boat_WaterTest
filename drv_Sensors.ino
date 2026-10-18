@@ -1,4 +1,4 @@
-y#include "declarations.h"
+#include "declarations.h"
 
 
 /* =========================================================
@@ -227,6 +227,10 @@ static void updateBno055() {
     }
 
     sensors_event_t orientationData;
+
+    uint8_t system, gyro, accel, mag = 0;
+    bno.getCalibration(&system, &gyro, &accel, &mag);
+    sys.magCalib = mag;
 
     const bool readSuccessful = bno.getEvent(
         &orientationData,
