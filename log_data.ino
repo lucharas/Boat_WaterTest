@@ -289,115 +289,21 @@ static void dumpMetadata(Print& out) {
  * ZRZUT POJEDYNCZEJ PRÓBKI CSV
  * ========================================================= */
 
-static void dumpSample(
-    Print& out,
-    const LogSample& sample
-) {
-    /* -----------------------------------------------------
-     * Moc jest obliczana wtórnie:
-     *
-     * mV * mA / 1 000 000 = W
-     * ----------------------------------------------------- */
-
-    const float powerW =
-        ((float)sample.voltageMv *
-         (float)sample.currentMa) /
-        1000000.0f;
-
-
-    /* -----------------------------------------------------
-     * Czas
-     * ----------------------------------------------------- */
-
-    out.print(sample.timestampMs);
-    out.print(',');
-
-
-    /* -----------------------------------------------------
-     * Pozycja
-     * ----------------------------------------------------- */
-
-    out.print(
-        (double)sample.lat / 1000000.0,
-        6
-    );
-
-    out.print(',');
-
-    out.print(
-        (double)sample.lon / 1000000.0,
-        6
-    );
-
-    out.print(',');
-
-
-    /* -----------------------------------------------------
-     * Zasilanie
-     * ----------------------------------------------------- */
-
-    out.print(sample.voltageMv);
-    out.print(',');
-
-    out.print(sample.currentMa);
-    out.print(',');
-
-    out.print(powerW, 3);
-    out.print(',');
-
-
-    /* -----------------------------------------------------
-     * Nawigacja
-     * ----------------------------------------------------- */
-
-    out.print(sample.speedCms);
-    out.print(',');
-
-    out.print(
-        sample.headingDeg10 / 10.0f,
-        1
-    );
-
-    out.print(',');
-
-    out.print(
-        sample.cogDeg10 / 10.0f,
-        1
-    );
-
-    out.print(',');
-
-
-    /* -----------------------------------------------------
-     * Wyjścia
-     * ----------------------------------------------------- */
-
-    out.print(sample.pwmThrottle);
-    out.print(',');
-
-    out.print(sample.pwmRudder);
-    out.print(',');
-
-
-    /* -----------------------------------------------------
-     * Jakość GPS
-     * ----------------------------------------------------- */
-
-    out.print(sample.satellites);
-    out.print(',');
-
-    out.print(
-        sample.hdop100 / 100.0f,
-        2
-    );
-
-    out.print(',');
-
-    out.println(
-        (uint16_t)sample.gpsAge100ms * 100U
-    );
+static void dumpSample(Print& out, const LogSample& sample) {
+    out.print(sample.time); out.print(',');
+    out.print(sample.glat); out.print(',');
+    out.print(sample.glon); out.print(',');
+    out.print(sample.vbat); out.print(',');
+    out.print(sample.ibat); out.print(',');
+    out.print(sample.gsog); out.print(',');
+    out.print(sample.head); out.print(',');
+    out.print(sample.gcog); out.print(',');
+    out.print(sample.thro); out.print(',');
+    out.print(sample.rudd); out.print(',');
+    out.print(sample.hdop); out.print(',');
+    out.print(sample.gsat); out.print(',');
+    out.println(sample.gage);
 }
-
 
 /* =========================================================
  * ZRZUT CAŁEGO LOGU
@@ -410,24 +316,7 @@ void dumpLog(Print& out) {
 
     dumpMetadata(out);
 
-    out.println(
-        F(
-            "timestamp_ms,"
-            "lat_deg,"
-            "lon_deg,"
-            "voltage_mv,"
-            "current_ma,"
-            "power_w,"
-            "speed_cms,"
-            "heading_deg,"
-            "cog_deg,"
-            "pwm_throttle_us,"
-            "pwm_rudder_us,"
-            "satellites,"
-            "hdop,"
-            "gps_age_ms"
-        )
-    );
+    out.println(F("time,glat,glon,vbat,ibat,gsog,head,gcog,thro,rudd,hdop,gsat,gage"));
 
     for (uint16_t index = 0;
          index < sampleCount;
