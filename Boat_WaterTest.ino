@@ -44,16 +44,13 @@ void loop() {
     const uint32_t now = millis();
     if (now - lastRcMs >= TASK_RC_MS) {
         lastRcMs += TASK_RC_MS;
-
         updateRC();
         updateSafety();
         updateFSM();
     }
 
 
-    if (
-        now - lastActuatorsMs >= TASK_ACTUATORS_MS
-    ) {
+    if ( now - lastActuatorsMs >= TASK_ACTUATORS_MS) {
         lastActuatorsMs += TASK_ACTUATORS_MS;
         updateActuators();
     }
