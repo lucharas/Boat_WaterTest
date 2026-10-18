@@ -34,7 +34,7 @@ Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podcz
 - CH1 - ster
 - CH3 - gaz
 - CH6, SB - sterowanie stanami: -100% DISARMED, 0% ARMED, 100% RECORDING
-- CH7, SC - natychmiastowe obejście limitu PWM do 100%
+- CH7, SC - -100 oraz 0 CRUISE, +100 natychmiastowe obejście limitu PWM do 100%
 
 **Piny ESP32**
 
