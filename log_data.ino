@@ -1,332 +1,79 @@
+// ============================================================================
+// PLIK: log_data.ino
+// ============================================================================
 #include "declarations.h"
-
 #include <math.h>
 
-
-/* =========================================================
- * FUNKCJE POMOCNICZE
- * ========================================================= */
-
-static uint16_t floatToUint16(
-    float value,
-    float multiplier
-) {
-    if (!isfinite(value) || value <= 0.0f) {
-        return 0;
-    }
-
-    const float scaled = value * multiplier;
-
-    if (scaled >= 65535.0f) {
-        return 65535;
-    }
-
-    return (uint16_t)lroundf(scaled);
+static uint16_t floatToUint16(float v, float m) { 
+    return (isfinite(v) && v > 0.0f) ? (v * m >= 65535.0f ? 65535 : (uint16_t)lroundf(v * m)) : 0; 
+}
+static int16_t floatToInt16(float v, float m) { 
+    return isfinite(v) ? (v * m <= -32768.0f ? -32768 : (v * m >= 32767.0f ? 32767 : (int16_t)lroundf(v * m))) : 0; 
+}
+static uint16_t angleToDeg10(float a) { 
+    if (!isfinite(a)) return 0; 
+    while (a < 0.0f) a += 360.0f; 
+    while (a >= 360.0f) a -= 360.0f; 
+    return (uint16_t)lroundf(a * 10.0f); 
+}
+static int32_t coordinateToInt(double c) { 
+    return isfinite(c) ? (c * 1000000.0 <= -2147483648.0 ? INT32_MIN : (c * 1000000.0 >= 2147483647.0 ? INT32_MAX : (int32_t)llround(c * 1000000.0))) : 0; 
+}
+static uint8_t gpsAgeTo100ms(uint32_t age) { 
+    return (age == UINT32_MAX) ? 255 : (age / 100UL > 255UL ? 255 : (uint8_t)(age / 100UL)); 
 }
 
-
-static int16_t floatToInt16(
-    float value,
-    float multiplier
-) {
-    if (!isfinite(value)) {
-        return 0;
-    }
-
-    const float scaled = value * multiplier;
-
-    if (scaled <= -32768.0f) {
-        return -32768;
-    }
-
-    if (scaled >= 32767.0f) {
-        return 32767;
-    }
-
-    return (int16_t)lroundf(scaled);
-}
-
-
-static uint16_t angleToDeg10(float angleDeg) {
-    if (!isfinite(angleDeg)) {
-        return 0;
-    }
-
-    while (angleDeg < 0.0f) {
-        angleDeg += 360.0f;
-    }
-
-    while (angleDeg >= 360.0f) {
-        angleDeg -= 360.0f;
-    }
-
-    return (uint16_t)lroundf(angleDeg * 10.0f);
-}
-
-
-static int32_t coordinateToInt(double coordinate) {
-    if (!isfinite(coordinate)) {
-        return 0;
-    }
-
-    const double scaled = coordinate * 1000000.0;
-
-    if (scaled <= -2147483648.0) {
-        return INT32_MIN;
-    }
-
-    if (scaled >= 2147483647.0) {
-        return INT32_MAX;
-    }
-
-    return (int32_t)llround(scaled);
-}
-
-
-static uint8_t gpsAgeTo100ms(uint32_t ageMs) {
-    if (ageMs == UINT32_MAX) {
-        return 255;
-    }
-
-    const uint32_t age100ms = ageMs / 100UL;
-
-    return age100ms > 255UL
-        ? 255
-        : (uint8_t)age100ms;
-}
-
-
-/* =========================================================
- * INICJALIZACJA LOGOWANIA
- * ========================================================= */
-
-void initLog() {
-    sampleCount = 0;
-}
-
-
-/* =========================================================
- * LOGICZNE CZYSZCZENIE BUFORA
- *
- * Dane w RAM nie są nadpisywane. Zostaje wyzerowany jedynie
- * licznik próbek.
- * ========================================================= */
-
-void clearLog() {
-    sampleCount = 0;
-}
-
-
-/* =========================================================
- * ZAPIS PRÓBKI
- *
- * Wywoływany przez scheduler co TASK_LOG_MS.
- * Zapis następuje tylko w STATE_RECORDING.
- * ========================================================= */
+void initLog() { sampleCount = 0; }
+void clearLog() { sampleCount = 0; }
 
 void addSample() {
-    if (sys.state != STATE_RECORDING) {
+    if (sys.state != STATE_RECORDING || sampleCount >= MAX_SAMPLES) {
+        if (sampleCount >= MAX_SAMPLES) setState(STATE_ARMED);
         return;
     }
 
+    LogSample& s = logBuffer[sampleCount];
+    s.time = millis();
+    s.glat = sys.gpsFixValid ? coordinateToInt(sys.lat) : 0;
+    s.glon = sys.gpsFixValid ? coordinateToInt(sys.lon) : 0;
+    s.gsog = floatToUint16(sys.speedKmh, 100.0f / 3.6f);
+    s.gcog = angleToDeg10(sys.cogDeg);
+    s.gsat = sys.satellites;
+    s.hdop = floatToUint16(sys.hdop, 100.0f);
+    s.gage = gpsAgeTo100ms(sys.gpsAgeMs);
+    s.vbat = floatToUint16(sys.voltageV, 1000.0f);
+    s.ibat = floatToInt16(sys.currentA, 1000.0f);
+    s.head = angleToDeg10(sys.headingDeg);
+    s.thro = sys.escOutputUs;
+    s.rudd = sys.servoOutputUs;
+    s.rsvd = 0;
 
-    /* -----------------------------------------------------
-     * Pełny bufor kończy nagrywanie
-     * ----------------------------------------------------- */
-
-    if (sampleCount >= MAX_SAMPLES) {
-        setState(STATE_ARMED);
-        return;
-    }
-
-
-    /* -----------------------------------------------------
-     * Pobranie miejsca na kolejną próbkę
-     * ----------------------------------------------------- */
-
-    LogSample& sample = logBuffer[sampleCount];
-
-
-    /* -----------------------------------------------------
-     * Czas
-     * ----------------------------------------------------- */
-
-    sample.timestampMs = millis();
-
-
-    /* -----------------------------------------------------
-     * GPS
-     *
-     * Przy braku poprawnego fixa współrzędne są zerowane.
-     * Jakość danych nadal można rozpoznać po HDOP, liczbie
-     * satelitów i wieku pozycji.
-     * ----------------------------------------------------- */
-
-    if (sys.gpsFixValid) {
-        sample.lat = coordinateToInt(sys.lat);
-        sample.lon = coordinateToInt(sys.lon);
-    } else {
-        sample.lat = 0;
-        sample.lon = 0;
-    }
-
-    sample.speedCms = floatToUint16(
-        sys.speedKmh,
-        100.0f / 3.6f
-    );
-
-    sample.cogDeg10 = angleToDeg10(sys.cogDeg);
-
-    sample.satellites = sys.satellites;
-
-    sample.hdop100 = floatToUint16(
-        sys.hdop,
-        100.0f
-    );
-
-    sample.gpsAge100ms = gpsAgeTo100ms(
-        sys.gpsAgeMs
-    );
-
-
-    /* -----------------------------------------------------
-     * INA226
-     * ----------------------------------------------------- */
-
-    sample.voltageMv = floatToUint16(
-        sys.voltageV,
-        1000.0f
-    );
-
-    sample.currentMa = floatToInt16(
-        sys.currentA,
-        1000.0f
-    );
-
-
-    /* -----------------------------------------------------
-     * BNO055
-     * ----------------------------------------------------- */
-
-    sample.headingDeg10 = angleToDeg10(
-        sys.headingDeg
-    );
-
-
-    /* -----------------------------------------------------
-     * Rzeczywiste sygnały wyjściowe
-     * ----------------------------------------------------- */
-
-    sample.pwmThrottle = sys.escOutputUs;
-    sample.pwmRudder   = sys.servoOutputUs;
-
-
-    /* -----------------------------------------------------
-     * Pole zarezerwowane
-     * ----------------------------------------------------- */
-
-    sample.reserved = 0;
-
-
-    /* -----------------------------------------------------
-     * Zatwierdzenie próbki
-     * ----------------------------------------------------- */
-
-    sampleCount++;
-
-
-    /* -----------------------------------------------------
-     * Ostatnia próbka zapełniła bufor
-     * ----------------------------------------------------- */
-
-    if (sampleCount >= MAX_SAMPLES) {
+    if (++sampleCount >= MAX_SAMPLES) {
         setState(STATE_ARMED);
     }
 }
-
-
-/* =========================================================
- * ZRZUT METADANYCH
- * ========================================================= */
 
 static void dumpMetadata(Print& out) {
-    out.print(F("# firmware="));
-    out.print(FW_NAME);
-    out.print(',');
-    out.println(FW_VERSION);
-
-    out.print(F("# propeller="));
-
-    if (sys.propellerName[0] != '\0') {
-        out.println(sys.propellerName);
-    } else {
-        out.println('-');
-    }
-
-    out.print(F("# pwm_limit_us="));
-    out.println(sys.maxThrottlePwm);
-
-    out.print(F("# note="));
-
-    if (sys.testNote[0] != '\0') {
-        out.println(sys.testNote);
-    } else {
-        out.println('-');
-    }
-
-    out.print(F("# samples="));
-    out.println(sampleCount);
-
-    out.print(F("# sample_size_bytes="));
-    out.println(sizeof(LogSample));
-
-    out.print(F("# buffer_capacity="));
-    out.println(MAX_SAMPLES);
+    out.printf("# firmware=%s,%s\n", FW_NAME, FW_VERSION);
+    out.printf("# propeller=%s\n", sys.propellerName[0] != '\0' ? sys.propellerName : "-");
+    out.printf("# pwm_limit_us=%u\n", sys.maxThrottlePwm);
+    out.printf("# note=%s\n", sys.testNote[0] != '\0' ? sys.testNote : "-");
+    out.printf("# samples=%u\n", sampleCount);
+    out.printf("# sample_size_bytes=%u\n", sizeof(LogSample));
+    out.printf("# buffer_capacity=%u\n", MAX_SAMPLES);
 }
-
-
-/* =========================================================
- * ZRZUT POJEDYNCZEJ PRÓBKI CSV
- * ========================================================= */
-
-static void dumpSample(Print& out, const LogSample& sample) {
-    out.print(sample.time); out.print(',');
-    out.print(sample.glat); out.print(',');
-    out.print(sample.glon); out.print(',');
-    out.print(sample.vbat); out.print(',');
-    out.print(sample.ibat); out.print(',');
-    out.print(sample.gsog); out.print(',');
-    out.print(sample.head); out.print(',');
-    out.print(sample.gcog); out.print(',');
-    out.print(sample.thro); out.print(',');
-    out.print(sample.rudd); out.print(',');
-    out.print(sample.hdop); out.print(',');
-    out.print(sample.gsat); out.print(',');
-    out.println(sample.gage);
-}
-
-/* =========================================================
- * ZRZUT CAŁEGO LOGU
- *
- * Obsługuje zarówno Serial, jak i BluetoothSerial.
- * ========================================================= */
 
 void dumpLog(Print& out) {
     out.println(F("# BOAT_WATER_TEST"));
-
     dumpMetadata(out);
-
-    out.println(F("time,glat,glon,vbat,ibat,gsog,head,gcog,thro,rudd,hdop,gsat,gage"));
-
-    for (uint16_t index = 0;
-         index < sampleCount;
-         index++) {
-
-        dumpSample(
-            out,
-            logBuffer[index]
+    out.println(F("time,glat,glon,vbat,ibat,gsog,head,gcog,thro,rudd,hdop,gsat,gage,rsvd"));
+    
+    for (uint16_t i = 0; i < sampleCount; i++) {
+        const LogSample& s = logBuffer[i];
+        out.printf("%u,%d,%d,%u,%d,%u,%u,%u,%u,%u,%u,%u,%u,%u\n",
+            s.time, s.glat, s.glon, s.vbat, s.ibat, s.gsog, s.head,
+            s.gcog, s.thro, s.rudd, s.hdop, s.gsat, s.gage, s.rsvd
         );
     }
-
     out.println(F("# END"));
 }
