@@ -101,8 +101,13 @@ void initSensors() {
         PIN_GPS_RX,
         PIN_GPS_TX
     );
+    delay(100);
+    Serial2.print(F("$PUBX,40,GLL,0,0,0,0,0,0*5C\r\n"));
+    Serial2.print(F("$PUBX,40,GSA,0,0,0,0,0,0*4E\r\n"));
+    Serial2.print(F("$PUBX,40,GSV,0,0,0,0,0,0*59\r\n"));
+    Serial2.print(F("$PUBX,40,VTG,0,0,0,0,0,0*5E\r\n"));
 
-    Serial.println("[SENS] GPS UART initialized");
+    Serial.println("[SENS] GPS UART initialized & configured");
 }
 
 
