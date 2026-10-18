@@ -40,20 +40,20 @@ enum FailsafeReason : uint8_t {
 #pragma pack(push, 1)
 
 struct LogSample {
-    uint32_t timestampMs;       // Czas od uruchomienia [ms]
-    int32_t  lat;               // Szerokość geograficzna x 1e6
-    int32_t  lon;               // Długość geograficzna x 1e6
-    uint16_t voltageMv;         // Napięcie [mV]
-    int16_t  currentMa;         // Prąd [mA]
-    uint16_t speedCms;          // Prędkość [cm/s]
-    uint16_t headingDeg10;      // Kurs BNO055 [0,1 stopnia]
-    uint16_t cogDeg10;          // COG GPS [0,1 stopnia]
-    uint16_t pwmThrottle;       // Rzeczywisty sygnał ESC [us]
-    uint16_t pwmRudder;         // Rzeczywisty sygnał serwa [us]
-    uint8_t  satellites;        // Liczba satelitów
-    uint16_t hdop100;           // HDOP x 100
-    uint8_t  gpsAge100ms;       // Wiek danych GPS w jednostkach 100 ms
-    uint16_t reserved;          // Rezerwa 2 B
+    uint32_t time;         // Czas od uruchomienia [ms]
+    int32_t  glat;         // Szerokość geograficzna x 1e6
+    int32_t  glon;         // Długość geograficzna x 1e6
+    uint16_t vbat;         // Napięcie [mV]
+    int16_t  ibat;         // Prąd [mA]
+    uint16_t gsog;         // Prędkość [cm/s]
+    uint16_t head;         // Kurs magnetyczny z IMU [0,1 stopnia]
+    uint16_t gcog;         // Kurs GPS nad dnem [0,1 stopnia]
+    uint16_t thro;         // Sygnał sterujący ESC [us]
+    uint16_t rudd;         // Sygnał serwa steru [us]
+    uint16_t hdop;         // HDOP x 100
+    uint8_t  gsat;         // Liczba satelitów
+    uint8_t  gage;         // Wiek danych GPS w jednostkach 100 ms
+    uint16_t rsvd;         // Rezerwa 2 B
 };
 
 #pragma pack(pop)
