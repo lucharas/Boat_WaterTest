@@ -1,5 +1,5 @@
 **Boat_WaterTest - specyfikacja projektu**
-ver.17.10.2026
+ver: 18.10.2026
 
 **Cel**
 
@@ -22,7 +22,7 @@ Rejestracja parametrów pracy i efektywności energetycznej napędu łodzi podcz
 - Aparatura RadioMaster Pocket, EdgeTX, ExpressLRS
 - INA226, I2C, bocznik 5 mΩ
 - BNO055, I2C
-- GPS, Serial2, 38400 baud, TinyGPS++, ograniczyć ramkę do niezbędnego minimum, np: $GPRMC i $GPGGA
+- GPS BN-880 GPS, Serial2, 38400 baud, TinyGPS++, ograniczyć ramkę do niezbędnego minimum, np: $GPRMC i $GPGGA (RMC = ON, GGA = ON)
 - ESC Flycolor 90 A
 - Silnik A28M-IPX8 2838 350 KV
 - Serwo steru
@@ -122,8 +122,7 @@ Failsafe ma pierwszeństwo przed maszyną stanów, logowaniem i Bluetooth.
 
 **Bezpieczeństwo**
 
-- Ostrzeżenie: prąd > 13 A lub moc > 280 W
-- Failsafe: napięcie < 19,2 V
+- Ostrzeżenie: prąd > 13 A lub moc > 280 W lub napięcie < 19,2 V
 - Failsafe: prąd > 16 A lub moc > 330 W przez ponad 250 ms
 - Przyczyna failsafe jest zapisywana w FailsafeReason
 
@@ -144,30 +143,23 @@ Failsafe ma pierwszeństwo przed maszyną stanów, logowaniem i Bluetooth.
 
 ```cpp
 struct LogSample {
-    uint32_t timestampMs;
-    int32_t  lat;
-    int32_t  lon;
-    uint16_t voltageMv;
-    int16_t  currentMa;
-    uint16_t speedCms;
-    uint16_t headingDeg10;
-    uint16_t cogDeg10;
-    uint16_t pwmThrottle;
-    uint16_t pwmRudder;
-    uint8_t  satellites;
-    uint16_t hdop100;
-    uint8_t  gpsAge100ms;
-    uint16_t reserved; 
+    uint32_t time;         // TIME: Czas od uruchomienia [ms]
+    int32_t  glat;         // GLAT: Szerokość geograficzna GPS [stopnie x 1e6]
+    int32_t  glon;         // GLON: Długość geograficzna GPS [stopnie x 1e6]
+    uint16_t vbat;         // VBAT: Napięcie baterii [mV]
+    int16_t  ibat;         // IBAT: Prąd baterii [mA]
+    uint16_t gsog;         // GSOG: Prędkość GPS względem dna [cm/s]
+    uint16_t head;         // HEAD: Kurs magnetyczny z IMU [0.1 stopnia, 0-3599]
+    uint16_t gcog;         // GCOG: Kurs GPS nad dnem (COG) [0.1 stopnia, 0-3599]
+    uint16_t thro;         // THRO: Sygnał sterujący ESC [us, np. 1000-2000]
+    uint16_t rudd;         // RUDD: Sygnał serwa steru [us, np. 1000-2000]
+    uint16_t hdop;         // HDOP: Rozmycie precyzji GPS [HDOP x 100]
+    uint8_t  gsat;         // GSAT: Liczba satelitów w fixie
+    uint8_t  gage;         // GAGE: Wiek danych GPS [jednostki 100 ms], max 255
+    uint16_t rsvd;         // RSVD: Rezerwa / wyrównanie [2 bajty]
 };
 ```
-
-- lat i lon są skalowane przez 1e-6
-- headingDeg10 i cogDeg10 przechowują kąt w 0,1 stopnia
-- hdop100 przechowuje HDOP pomnożony przez 100, np. 0,85 jako 85
-- gpsAge100ms przechowuje wiek danych GPS w jednostkach 100 ms; wartość jest ograniczana do 255, czyli 25,5 s
-- Liczba satelitów, HDOP i wiek danych pozwalają ocenić jakość każdej próbki GPS
-- Rezerwa wyrównująca do pełnych 32 bajtów (2 B)
-- Struktura zajmuje 32 B bez pola flag
+- Struktura zajmuje 32 B 
 - Rozmiar należy potwierdzić przez static_assert(sizeof(LogSample) == 32)
 
 **Bluetooth i komendy**
@@ -225,5 +217,6 @@ Komendy mają jedną stałą składnię, bez spacji i aliasów. Wielkość liter
 - Obiekty bibliotek i bufory są definiowane jeden raz w Boat_WaterTest.ino, a w pozostałych plikach udostępniane przez extern
 - Rejestracja odbywa się wyłącznie do RAM
 - Nie używać przerwań, dopóki pomiary nie wykażą, że scheduler nie spełnia wymagań czasowych
+
 
 
