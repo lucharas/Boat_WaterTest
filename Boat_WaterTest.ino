@@ -37,9 +37,7 @@ void setup() {
     lastLogMs       = now;
     lastStatusMs    = now;
 
-    Serial.println(
-        F("[BOOT] Initialization complete")
-    );
+    Serial.println(F("[BOOT] Initialization complete"));
 }
 
 void loop() {
