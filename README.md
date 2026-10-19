@@ -1,5 +1,5 @@
 **Boat_WaterTest - specyfikacja projektu**
-ver: 18.10.2026
+ver: 19.10.2026
 
 **Cel**
 
@@ -130,8 +130,8 @@ Failsafe ma pierwszeństwo przed maszyną stanów, logowaniem i Bluetooth.
 
 - Logowanie działa tylko w STATE_RECORDING
 - Częstotliwość zapisu: 5 Hz
-- MAX_SAMPLES = 3000
-- Rekord ma docelowo 32 B, więc bufor zajmuje około 96 kB RAM
+- MAX_SAMPLES = 2000 //więcej się nie mieści przez pamięciożerny BT 
+- Rekord ma 32 B, więc bufor zajmuje około 64 kB RAM
 - Wartości całkowite: napięcie w mV, prąd w mA, prędkość w cm/s, kąty w 0,1 stopnia
 - Zapełnienie bufora kończy nagrywanie i przełącza system do STATE_ARMED
 
