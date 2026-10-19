@@ -1,396 +1,167 @@
+// ============================================================================
+// PLIK: hmi_BT.ino
+// ============================================================================
 #include "declarations.h"
 
-
-/* =========================================================
- * OBIEKT ZDEFINIOWANY W Boat_WaterTest.ino
- * ========================================================= */
-
 extern BluetoothSerial SerialBT;
-
-
-/* =========================================================
- * BUFOR ODBIORCZY
- * ========================================================= */
 
 static char    btRxBuffer[64];
 static uint8_t btRxIndex = 0;
 
-
-/* =========================================================
- * FUNKCJE POMOCNICZE
- * ========================================================= */
-
-static const char* stateName(BoatState state) {
-    switch (state) {
-        case STATE_BOOT:
-            return "BOOT";
-
-        case STATE_DISARMED:
-            return "DISARMED";
-
-        case STATE_ARMED:
-            return "ARMED";
-
-        case STATE_RECORDING:
-            return "RECORDING";
-
-        case STATE_FAILSAFE:
-            return "FAILSAFE";
-
-        case STATE_BT_DUMP:
-            return "BT_DUMP";
-
-        default:
-            return "UNKNOWN";
+static const char* stateName(BoatState s) {
+    switch (s) {
+        case STATE_BOOT:      return "BOOT";
+        case STATE_DISARMED:  return "DISARMED";
+        case STATE_ARMED:     return "ARMED";
+        case STATE_RECORDING: return "RECORDING";
+        case STATE_FAILSAFE:  return "FAILSAFE";
+        case STATE_BT_DUMP:   return "BT_DUMP";
+        default:              return "UNKNOWN";
     }
 }
 
-
-static const char* failsafeName(FailsafeReason reason) {
-    switch (reason) {
-        case FAILSAFE_NONE:
-            return "NONE";
-
-        case FAILSAFE_RC_LOST:
-            return "RC_LOST";
-
-        case FAILSAFE_VOLTAGE_LOW:
-            return "VOLTAGE_LOW";
-
-        case FAILSAFE_OVERCURRENT:
-            return "OVERCURRENT";
-
-        case FAILSAFE_OVERPOWER:
-            return "OVERPOWER";
-
-        default:
-            return "UNKNOWN";
+static const char* failsafeName(FailsafeReason r) {
+    switch (r) {
+        case FAILSAFE_NONE:        return "NONE";
+        case FAILSAFE_RC_LOST:     return "RC_LOST";
+        case FAILSAFE_VOLTAGE_LOW: return "VOLTAGE_LOW";
+        case FAILSAFE_OVERCURRENT: return "OVERCURRENT";
+        case FAILSAFE_OVERPOWER:   return "OVERPOWER";
+        default:                   return "UNKNOWN";
     }
 }
 
-
-static bool isUnsignedNumber(const char* text) {
-    if (text == nullptr || *text == '\0') {
-        return false;
-    }
-
-    while (*text != '\0') {
-        if (!isdigit((unsigned char)*text)) {
-            return false;
-        }
-
-        text++;
-    }
-
+static bool isUnsignedNumber(const char* t) {
+    if (!t || !*t) return false;
+    while (*t) { if (!isdigit((unsigned char)*t++)) return false; }
     return true;
 }
 
-
-/* =========================================================
- * STATUS SYSTEMU
- * ========================================================= */
-
 static void printStatus(Print& out) {
     out.println(F("STATUS"));
-
-    out.print(F("STATE="));
-    out.println(stateName(sys.state));
-
-    out.print(F("FAILSAFE="));
-    out.println(failsafeName(sys.failsafeReason));
-
-    out.print(F("RC="));
-    out.println(sys.linkUp ? F("OK") : F("LOST"));
-
-    out.print(F("RSSI_DBM="));
-    out.println(sys.rssiDbm);
-
-    out.print(F("LQ_PERCENT="));
-    out.println(sys.lqPercent);
-
-    out.print(F("CH1_STEER_US="));
-    out.println(sys.rcSteerUs);
-
-    out.print(F("CH3_THRO_US="));
-    out.println(sys.rcThroUs);
-
-    out.print(F("CH6_SB_US="));
-    out.println(sys.rcSbUs);
-
-    out.print(F("CH7_SC_US="));
-    out.println(sys.rcScUs);
-
-    out.print(F("NO_LIMITS="));
-    out.println(sys.rcNoLimits ? F("YES") : F("NO"));
-
-    out.print(F("GPS_FIX="));
-    out.println(sys.gpsFixValid ? F("YES") : F("NO"));
-
-    out.print(F("GPS_LAT="));
-    out.println(sys.lat, 6);
-
-    out.print(F("GPS_LON="));
-    out.println(sys.lon, 6);
-
-    out.print(F("GPS_SPEED_KMH="));
-    out.println(sys.speedKmh, 2);
-
-    out.print(F("GPS_COG_DEG="));
-    out.println(sys.cogDeg, 1);
-
-    out.print(F("GPS_SATELLITES="));
-    out.println(sys.satellites);
-
-    out.print(F("GPS_HDOP="));
-    out.println(sys.hdop, 2);
-
-    out.print(F("GPS_AGE_MS="));
-
-    if (sys.gpsAgeMs == UINT32_MAX) {
-        out.println(F("INVALID"));
-    } else {
-        out.println(sys.gpsAgeMs);
-    }
-
-    out.print(F("MAG_OK="));
-    out.println(sys.imuHealthy ? F("YES") : F("NO"));
-
-    out.print(F("HEADING_DEG="));
-    out.println(sys.headingDeg, 1);
-
-    out.print(F("VBAT_V="));
-    out.println(sys.voltageV, 2);
-
-    out.print(F("CURRENT_A="));
-    out.println(sys.currentA, 2);
-
-    out.print(F("POWER_W="));
-    out.println(sys.powerW, 1);
-
-    out.print(F("CURRENT_WARNING="));
-    out.println(sys.currentWarning ? F("YES") : F("NO"));
-
-    out.print(F("POWER_WARNING="));
-    out.println(sys.powerWarning ? F("YES") : F("NO"));
-
-    out.print(F("ESC_OUTPUT_US="));
-    out.println(sys.escOutputUs);
-
-    out.print(F("SERVO_OUTPUT_US="));
-    out.println(sys.servoOutputUs);
-
-    out.print(F("PWM_LIMIT_US="));
-    out.println(sys.maxThrottlePwm);
-
-    out.print(F("PROP="));
-    out.println(
-        sys.propellerName[0] != '\0'
-            ? sys.propellerName
-            : "-"
-    );
-
-    out.print(F("NOTE="));
-    out.println(
-        sys.testNote[0] != '\0'
-            ? sys.testNote
-            : "-"
-    );
-
-    out.print(F("SAMPLES="));
-    out.print(sampleCount);
-    out.print('/');
-    out.println(MAX_SAMPLES);
+    out.printf("STATE=%s\n", stateName(sys.state));
+    out.printf("FAILSAFE=%s\n", failsafeName(sys.failsafeReason));
+    out.printf("RC=%s\n", sys.linkUp ? "OK" : "LOST");
+    out.printf("RSSI_DBM=%d\nLQ_PERCENT=%u\n", sys.rssiDbm, sys.lqPercent);
+    out.printf("CH1_STEER_US=%u\nCH3_THRO_US=%u\nCH6_SB_US=%u\nCH7_SC_US=%u\n", sys.rcSteerUs, sys.rcThroUs, sys.rcSbUs, sys.rcScUs);
+    out.printf("NO_LIMITS=%s\n", sys.rcNoLimits ? "YES" : "NO");
+    out.printf("GPS_FIX=%s\nGPS_LAT=%.6f\nGPS_LON=%.6f\n", sys.gpsFixValid ? "YES" : "NO", sys.lat, sys.lon);
+    out.printf("GPS_SPEED_KMH=%.2f\nGPS_COG_DEG=%.1f\nGPS_SATELLITES=%u\nGPS_HDOP=%.2f\n", sys.speedKmh, sys.cogDeg, sys.satellites, sys.hdop);
+    if (sys.gpsAgeMs == UINT32_MAX) out.println(F("GPS_AGE_MS=INVALID"));
+    else out.printf("GPS_AGE_MS=%u\n", sys.gpsAgeMs);
+    out.printf("MAG_OK=%s\nHEADING_DEG=%.1f\n", sys.imuHealthy ? "YES" : "NO", sys.headingDeg);
+    out.printf("VBAT_V=%.2f\nCURRENT_A=%.2f\nPOWER_W=%.1f\n", sys.voltageV, sys.currentA, sys.powerW);
+    out.printf("CURRENT_WARNING=%s\nPOWER_WARNING=%s\n", sys.currentWarning ? "YES" : "NO", sys.powerWarning ? "YES" : "NO");
+    out.printf("ESC_OUTPUT_US=%u\nSERVO_OUTPUT_US=%u\nPWM_LIMIT_US=%u\n", sys.escOutputUs, sys.servoOutputUs, sys.maxThrottlePwm);
+    out.printf("PROP=%s\n", sys.propellerName[0] ? sys.propellerName : "-");
+    out.printf("NOTE=%s\n", sys.testNote[0] ? sys.testNote : "-");
+    out.printf("SAMPLES=%u/%u\n", sampleCount, MAX_SAMPLES);
 }
-
-
-/* =========================================================
- * LISTA KOMEND
- * ========================================================= */
 
 static void printHelp(Print& out) {
-    out.println(F("COMMANDS:"));
-    out.println(F("BTDUMP"));
-    out.println(F("STATUS"));
-    out.println(F("PWM1450"));
-    out.println(F("PROP65"));
-    out.println(F("NOTEtext"));
-    out.println(F("DUMP"));
-    out.println(F("CLEAR"));
-    out.println(F("EXIT"));
-    out.println(F("HELP"));
+    out.println(F("COMMANDS:\nBTDUMP\nSTATUS\nPWM1450\nPROP65\nNOTEtext\nDUMP\nCLEAR\nEXIT\nHELP"));
 }
-
-
-/* =========================================================
- * INICJALIZACJA BLUETOOTH
- * ========================================================= */
 
 void initBT() {
-    sys.btActive    = false;
-    sys.btConnected = false;
-
+    sys.btActive = sys.btConnected = false;
     btRxIndex = 0;
-
     sys.maxThrottlePwm = ESC_MAX_US;
-    sys.propellerName[0] = '\0';
-    sys.testNote[0]      = '\0';
+    sys.propellerName[0] = sys.testNote[0] = '\0';
 }
-
-
-/* =========================================================
- * URUCHOMIENIE BLUETOOTH
- * ========================================================= */
 
 void startBT() {
-    if (sys.btActive) {
-        return;
-    }
-
-    if (SerialBT.begin(BT_DEVICE_NAME)) {
+    if (!sys.btActive) {
+        SerialBT.begin(BT_DEVICE_NAME);
         sys.btActive = true;
-        btRxIndex    = 0;
-
-        Serial.println("[BT] Bluetooth started");
-    } else {
-        sys.btActive = false;
-        Serial.println("[BT] Bluetooth start failed");
     }
 }
-
-
-/* =========================================================
- * WYŁĄCZENIE BLUETOOTH
- * ========================================================= */
 
 void stopBT() {
-    if (!sys.btActive) {
-        return;
+    if (sys.btActive) {
+        SerialBT.end();
+        sys.btActive = false;
+        sys.btConnected = false;
     }
-
-    SerialBT.end();
-
-    sys.btActive    = false;
-    sys.btConnected = false;
-
-    btRxIndex = 0;
-
-    Serial.println("[BT] Bluetooth stopped");
-}
-
-
-/* =========================================================
- * KOMENDA PWM
- *
- * Składnia:
- * PWM1450
- * ========================================================= */
-
-static void handlePwmCommand(const char* valueText) {
-    if (!isUnsignedNumber(valueText)) {
-        SerialBT.println(F("ERR: INVALID PWM"));
-        return;
-    }
-
-    const long value = strtol(valueText, nullptr, 10);
-
-    if (value < ESC_DEADZONE_US || value > ESC_MAX_US) {
-        SerialBT.print(F("ERR: PWM RANGE "));
-        SerialBT.print(ESC_DEADZONE_US);
-        SerialBT.print('-');
-        SerialBT.println(ESC_MAX_US);
-        return;
-    }
-
-    sys.maxThrottlePwm = (uint16_t)value;
-
-    SerialBT.print(F("OK: PWM="));
-    SerialBT.println(sys.maxThrottlePwm);
-}
-
-
-/* =========================================================
- * KOMENDA PROP
- *
- * Składnia:
- * PROP65
- * ========================================================= */
-
-static void handlePropCommand(const char* valueText) {
-    if (valueText == nullptr || *valueText == '\0') {
-        SerialBT.println(F("ERR: EMPTY PROP"));
-        return;
-    }
-
-    if (strlen(valueText) >= sizeof(sys.propellerName)) {
-        SerialBT.println(F("ERR: PROP TOO LONG"));
-        return;
-    }
-
-    strncpy(
-        sys.propellerName,
-        valueText,
-        sizeof(sys.propellerName)
-    );
-
-    sys.propellerName[
-        sizeof(sys.propellerName) - 1
-    ] = '\0';
-// (ciąg dalszy uciętego pliku z komendą PROP)
-}
-
-static void handleNoteCommand(const char* valueText) {
-    if (valueText == nullptr || *valueText == '\0') {
-        SerialBT.println(F("ERR: EMPTY NOTE"));
-        return;
-    }
-    if (strlen(valueText) >= sizeof(sys.testNote)) {
-        SerialBT.println(F("ERR: NOTE TOO LONG"));
-        return;
-    }
-    strncpy(sys.testNote, valueText, sizeof(sys.testNote));
-    sys.testNote[sizeof(sys.testNote) - 1] = '\0';
-    SerialBT.println(F("OK: NOTE SAVED"));
 }
 
 static void processBtCommand(const char* cmd) {
-    if (strcasecmp(cmd, "BTDUMP") == 0) {
+    String c = String(cmd);
+    c.trim();
+    if (c.length() == 0) return;
+    
+    String cUpper = c;
+    cUpper.toUpperCase();
+
+    if (cUpper == "BTDUMP") {
         if (sys.state == STATE_DISARMED) {
             setState(STATE_BT_DUMP);
-            SerialBT.println(F("OK: BT_DUMP ENTERED"));
+            SerialBT.println(F("OK BTDUMP"));
         } else {
-            SerialBT.println(F("ERR: MUST BE DISARMED"));
+            SerialBT.println(F("ERR NOT DISARMED"));
         }
-    } else if (strcasecmp(cmd, "STATUS") == 0) {
-        printStatus(SerialBT);
-    } else if (strncasecmp(cmd, "PWM", 3) == 0) {
-        handlePwmCommand(cmd + 3);
-    } else if (strncasecmp(cmd, "PROP", 4) == 0) {
-        handlePropCommand(cmd + 4);
-        SerialBT.println(F("OK: PROP SAVED"));
-    } else if (strncasecmp(cmd, "NOTE", 4) == 0) {
-        handleNoteCommand(cmd + 4);
-    } else if (strcasecmp(cmd, "DUMP") == 0) {
-        dumpLog(SerialBT);
-    } else if (strcasecmp(cmd, "CLEAR") == 0) {
-        clearLog();
-        SerialBT.println(F("OK: CLEARED"));
-    } else if (strcasecmp(cmd, "EXIT") == 0) {
+    }
+    else if (cUpper == "EXIT") {
         if (sys.state == STATE_BT_DUMP) {
             setState(STATE_DISARMED);
-            SerialBT.println(F("OK: EXIT"));
+            SerialBT.println(F("OK EXIT"));
+        } else {
+            SerialBT.println(F("ERR NOT BT_DUMP"));
         }
-    } else if (strcasecmp(cmd, "HELP") == 0) {
+    }
+    else if (cUpper == "STATUS") {
+        printStatus(SerialBT);
+    }
+    else if (cUpper == "DUMP") {
+        dumpLog(SerialBT);
+    }
+    else if (cUpper == "CLEAR") {
+        clearLog();
+        SerialBT.println(F("OK CLEAR"));
+    }
+    else if (cUpper == "HELP") {
         printHelp(SerialBT);
-    } else {
-        SerialBT.println(F("ERR: UNKNOWN COMMAND"));
+    }
+    else if (cUpper.startsWith("PWM")) {
+        String valStr = cUpper.substring(3);
+        if (isUnsignedNumber(valStr.c_str())) {
+            uint16_t val = (uint16_t)valStr.toInt();
+            if (val >= ESC_DEADZONE_US && val <= ESC_MAX_US) {
+                sys.maxThrottlePwm = val;
+                SerialBT.printf("OK PWM=%u\n", val);
+            } else {
+                SerialBT.println(F("ERR OUT OF RANGE"));
+            }
+        } else {
+            SerialBT.println(F("ERR INVALID PWM"));
+        }
+    }
+    else if (cUpper.startsWith("PROP")) {
+        // Wycinamy za pomocą oryginalnego ciągu (c), żeby zachować wielkość liter
+        String valStr = c.substring(4);
+        strncpy(sys.propellerName, valStr.c_str(), sizeof(sys.propellerName) - 1);
+        sys.propellerName[sizeof(sys.propellerName) - 1] = '\0';
+        SerialBT.printf("OK PROP=%s\n", sys.propellerName);
+    }
+    else if (cUpper.startsWith("NOTE")) {
+        // Zachowanie oryginalnej wielkości liter notatki
+        String valStr = c.substring(4);
+        strncpy(sys.testNote, valStr.c_str(), sizeof(sys.testNote) - 1);
+        sys.testNote[sizeof(sys.testNote) - 1] = '\0';
+        SerialBT.printf("OK NOTE=%s\n", sys.testNote);
+    }
+    else {
+        SerialBT.println(F("ERR UNKNOWN CMD"));
     }
 }
 
 void updateBT() {
     if (!sys.btActive) return;
     
+    sys.btConnected = SerialBT.hasClient();
+    
     while (SerialBT.available() > 0) {
-        char c = (char)SerialBT.read();
+        char c = SerialBT.read();
+        // Oczekujemy końca linii (CR lub LF)
         if (c == '\n' || c == '\r') {
             if (btRxIndex > 0) {
                 btRxBuffer[btRxIndex] = '\0';
@@ -404,4 +175,3 @@ void updateBT() {
         }
     }
 }
- 

@@ -40,7 +40,7 @@
 #define ESC_DEADZONE_US         1180
 #define ESC_MAX_US              2000
 #define ESC_ARM_TIME_MS         3000
-#define ESC_RAMP_STEP_US        20
+#define ESC_RAMP_STEP_US        4
 #define SERVO_MIN_US            1000
 #define SERVO_CENTER_US         1500
 #define SERVO_MAX_US            2000
@@ -61,7 +61,9 @@
 #define GPS_BAUDRATE            38400
 
 // --- BUFOR LOGOWANIA (3000 rekordów x 32 B = 96 000 B) ---
-#define MAX_SAMPLES             3000
+// --- niestety BT serial rezerwuje gigantyczną ilość pamięci
+// --- aktualnie (2000 x 32 = 64 000B =400s~6.5')
+#define MAX_SAMPLES             2000
 
 // --- SCHEDULER - INTERWAŁY W MILISEKUNDACH ---
 #define TASK_RC_MS              20
